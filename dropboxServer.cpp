@@ -176,6 +176,12 @@ bool connect_client(std::string user_id, int client_socket_fd) {
         }
     }
 
+    std::cout << "Imprimindo arquivos do cliente\n";
+    it = clients.find(user_id);
+    for (auto &file : it->second->files) {
+        std::cout << file.filename() << "\n";
+    }
+
     return ok;
 }
 
@@ -245,6 +251,7 @@ void run_user_interface(const std::string user_id, int client_socket_fd) {
 
         case ListServer:
             std::cout << "ListServer Requested\n";
+            send_file_infos(user_id, client_socket_fd);
             break;
 
         case GetSyncDir:
@@ -265,6 +272,7 @@ void run_user_interface(const std::string user_id, int client_socket_fd) {
     while (command != Exit);
 }
 
+// receive_file {{{
 void receive_file(std::string user_id, std::string filename, int client_socket_fd) {
 
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
@@ -306,8 +314,17 @@ void receive_file(std::string user_id, std::string filename, int client_socket_f
     fclose(file);
 
     std::cout << "Arquivo " << absolute_path.string() << " recebido\n";
-}
 
+    // escreve a data de modificação do arquivo
+    fs::last_write_time(absolute_path, time);
+
+    // Atualiza lista de arquivos do usuário
+    update_files(user_id, filename, file_size, time);
+
+}
+// }}}
+
+// send_file {{{
 void send_file(std::string user_id, std::string filename, int client_socket_fd) {
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
 
@@ -315,7 +332,7 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
 
     bool file_ok;
     FILE *file;
-    if (file_ok = fs::exists(absolute_path)) {
+    if ((file_ok = fs::exists(absolute_path)) == true) {
         file = fopen(absolute_path.c_str(), "rb");
 
         if (file == nullptr) {
@@ -327,8 +344,8 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
 
     if (file_ok) {
         std::cout << "Arquivo ok\n";
-
-    } else {
+    }
+    else {
         std::cout << "Arquivo não ok\n";
         return;
     }
@@ -341,4 +358,59 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
         send_file(client_socket_fd, file, file_size);
     }
     fclose(file);
+}
+// }}}
+
+void update_files(std::string user_id, std::string filename, size_t file_size, time_t timestamp) {
+    auto it = clients.find(user_id);
+
+    if (it == clients.end()) {
+        std::cerr << "Erro ao atualizar os arquivos do cliente, cliente " << user_id << " não encontrado.\n";
+        return;
+    }
+
+    Client *client = it->second;
+
+    FileInfo *file = nullptr;
+    for (FileInfo &file_info : client->files) {
+        if (file_info.filename() == filename) {
+            file = &file_info;
+            break;
+        }
+    }
+
+    if (file != nullptr) {
+        file->set_bytes(file_size);
+        file->set_last_modified(timestamp);
+    }
+    else {
+        // Arquivo não existe;
+        FileInfo new_file{};
+        new_file.set_filename(filename);
+        new_file.set_extension(fs::path(filename).extension().string());
+        new_file.set_bytes(file_size);
+        new_file.set_last_modified(timestamp);
+        client->files.push_back(new_file);
+    }
+}
+
+void send_file_infos(std::string user_id, int client_socket_fd) {
+    auto it = clients.find(user_id);
+
+    // Testar se o cliente foi encontrado
+    if (it == clients.end()) {
+        std::cerr << "Erro ao enviar a lista de file_infos, client " << user_id
+            << " não encontrado\n";
+        return;
+    }
+
+    Client *client = it->second;
+    size_t n = client->files.size();
+
+    // Envia o tamanho da lista
+    write_socket(client_socket_fd, (const void *) &n, sizeof(n));
+    for (int i = 0; i < n; ++i) {
+        write_socket(client_socket_fd, (const void *) &client->files[i], sizeof(client->files[i]));
+    }
+
 }

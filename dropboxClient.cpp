@@ -151,7 +151,7 @@ void run_interface() {
         }
         else if (command == "list_server") {
             std::cout << "ListServer\n";
-            //list_server_files();
+            list_server_files();
         }
         else if (command == "list_client") {
             std::cout << "ListClient\n";
@@ -258,7 +258,35 @@ void get_file(std::string filename) {
 }
 
 void close_connection() {
+    std::lock_guard<std::mutex> lock(socket_mutex);
+
     Command command = Exit;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
     close(socket_fd);
+}
+
+void list_server_files() {
+    std::lock_guard<std::mutex> lock(socket_mutex);
+
+    // Envia o comando para listar os arquivos.
+    Command command = ListServer;
+    write_socket(socket_fd, (const void *) &command, sizeof(command));
+
+    // Lê o tamamnho da lista
+    size_t n;
+    read_socket(socket_fd, (void *) &n, sizeof(n));
+
+    std::vector<FileInfo> files;
+    files.reserve(n);
+
+    // Se prepara para receber a lista dos arquivos.
+    for (int i = 0; i < n; ++i) {
+        FileInfo file_info;
+        read_socket(socket_fd, (void *) &file_info, sizeof(file_info));
+        files.push_back(file_info);
+    }
+
+    for (auto &file : files) {
+        std::cout << file.filename() << "\n";
+    }
 }
