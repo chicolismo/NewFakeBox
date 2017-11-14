@@ -27,6 +27,7 @@ void sync_client();
 void send_file(std::string filename);
 void get_file(std::string filename);
 void delete_file(std::string filename);
+void send_delete_command(std::string filename);
 
 void close_connection();
 

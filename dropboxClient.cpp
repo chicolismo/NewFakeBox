@@ -78,7 +78,7 @@ void run_sync_thread() {
         FileSystemEvent event = inotify.getNextEvent();
 
         if (event.mask & IN_DELETE || event.mask & IN_MOVED_FROM) {
-            //send_delete_command(event.path.filename().string());
+            send_delete_command(event.path.filename().string());
         }
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE || event.mask & IN_MOVED_TO) {
         else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
@@ -396,6 +396,23 @@ void delete_file(std::string filename) {
     }
     else {
         std::cout << "Arquivo " << filename << " não existe no diretório de sincronização\n";
+    }
+}
+
+void send_delete_command(std::string filename) {
+    std::lock_guard<std::mutex> lock(socket_mutex);
+    
+    Command command = Delete;
+
+    // Envia o comando de Delete para o servidor
+    ssize_t bytes;
+    bytes = write(socket_fd, (void *) &command, sizeof(command));
+    if (bytes < 0) {
+        std::cerr << "Erro ao enviar o comando Delete para o servidor\n";
+    }
+    else {
+        // Envia o nome do arquivo para o servidor
+        write(socket_fd, (void *)(filename.c_str()), BUFFER_SIZE);
     }
 }
 

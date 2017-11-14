@@ -253,6 +253,8 @@ void run_user_interface(const std::string user_id, int client_socket_fd) {
 
         case Delete:
             std::cout << "Delete Requested\n";
+            filename = receive_string(client_socket_fd);
+            delete_file(user_id, filename, client_socket_fd);
             break;
 
         case ListServer:
@@ -377,6 +379,41 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
     
 }
 // }}}
+
+void delete_file(std::string user_id, std::string filename, int client_socket_fd) {
+    auto it = clients.find(user_id);
+    if (it == clients.end()) {
+        return;
+    }
+
+    fs::path user_dir(user_id);
+    fs::path file_path(filename);
+    fs::path full_path = server_dir / user_dir / file_path;
+
+    bool deleted = fs::remove(full_path);
+    if (deleted) {
+        std::cout << "Arquivo " << full_path << " removido do servidor\n";
+
+        bool found = false;
+        int counter = 0;
+
+        for (FileInfo &info : it->second->files) {
+            if (info.filename() == filename) {
+                //std::cout << filename << " Encontrado nos filenames\n";
+                found = true;
+                break;
+            }
+            ++counter;
+        }
+        if (found) {
+            it->second->files.erase(it->second->files.begin() + counter);
+        }
+
+    }
+    else {
+        std::cout << "Arquivo " << full_path << " não existe\n";
+    }
+}
 
 void update_files(std::string user_id, std::string filename, size_t file_size, time_t timestamp) {
     auto it = clients.find(user_id);
