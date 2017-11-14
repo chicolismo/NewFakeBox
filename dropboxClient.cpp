@@ -81,7 +81,8 @@ void run_sync_thread() {
             send_delete_command(event.path.filename().string());
         }
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE || event.mask & IN_MOVED_TO) {
-        else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
+        //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
+        else if (event.mask & IN_CLOSE_WRITE) {
             send_file(event.path.string());
         }
     }
@@ -405,14 +406,8 @@ void send_delete_command(std::string filename) {
     Command command = Delete;
 
     // Envia o comando de Delete para o servidor
-    ssize_t bytes;
-    bytes = write(socket_fd, (void *) &command, sizeof(command));
-    if (bytes < 0) {
-        std::cerr << "Erro ao enviar o comando Delete para o servidor\n";
-    }
-    else {
-        // Envia o nome do arquivo para o servidor
-        write(socket_fd, (void *)(filename.c_str()), BUFFER_SIZE);
+    if (write_socket(socket_fd, (void *) &command, sizeof(command))) {
+        send_string(socket_fd, filename);
     }
 }
 

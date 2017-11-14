@@ -170,8 +170,8 @@ void send_string(int socket_fd, const std::string &input) {
     if (write_socket(socket_fd, (const void *) &size, sizeof(size))) {
 
         // Envia os bytes
-        if (write_socket(socket_fd, (const void *) buffer, size)) {
-            std::cout << "String escrita: " << buffer << "\n";
+        if (!write_socket(socket_fd, (const void *) buffer, size)) {
+            std::cerr << "Erro ao tentar enviar a string " << input << "\n";
         }
     }
 }
@@ -187,14 +187,14 @@ std::string receive_string(int socket_fd) {
     if (ok) {
         // Lê os bytes
         char buffer[size];
-        bytes = read_socket(socket_fd, (void *) buffer, size);
-
-        std::cout << "String lida: " << buffer << "\n";
+        if (!read_socket(socket_fd, (void *) buffer, size)) {
+            std::cout << "Erro ao receber a string\n";
+        }
         return std::string(buffer);
     }
     else {
 
-        std::cerr << "Erro ao ler a string\n";
+        std::cerr << "Erro ao receber o tamanho da string\n";
         return "";
     }
 }
