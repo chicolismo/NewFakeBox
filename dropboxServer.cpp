@@ -463,6 +463,7 @@ void send_file_infos(std::string user_id, int client_socket_fd) {
 
     // Envia o tamanho da lista
     write_socket(client_socket_fd, (const void *) &n, sizeof(n));
+    
     for (int i = 0; i < n; ++i) {
         write_socket(client_socket_fd, (const void *) &client->files[i], sizeof(client->files[i]));
     }
