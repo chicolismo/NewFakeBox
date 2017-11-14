@@ -50,6 +50,8 @@ struct FileInfo {
 
     void set_bytes(size_t bytes);
     size_t bytes() const;
+
+    std::string string() const;
 };
 
 

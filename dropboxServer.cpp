@@ -128,24 +128,30 @@ void initialize_clients() {
 
     while (dir_iter != end_iter) {
         if (fs::is_directory(dir_iter->path())) {
-            std::string dir_name = dir_iter->path().filename().string();
-            Client *client = new Client(dir_name);
+            std::string user_id(fs::basename(dir_iter->path().string()));
 
-            fs::path client_dir(dir_name);
-            fs::directory_iterator client_dir_iter;
+            clients[user_id] = new Client(user_id);
+
+            fs::directory_iterator client_dir_iter(dir_iter->path());
+
             while (client_dir_iter != end_iter) {
                 if (fs::is_regular_file(client_dir_iter->path())) {
-                    auto path = client_dir_iter->path();
                     FileInfo file_info;
-                    file_info.set_filename(path.filename().string());
-                    file_info.set_extension(path.filename().extension().string());
-                    file_info.set_bytes(fs::file_size(path));
-                    file_info.set_last_modified(fs::last_write_time(path));
-                    client->files.push_back(file_info);
+
+                    fs::path filepath(client_dir_iter->path());
+
+                    file_info.set_filename(filepath.filename().string());
+
+                    file_info.set_extension(fs::extension(filepath));
+
+                    file_info.set_last_modified(fs::last_write_time(filepath));
+
+                    file_info.set_bytes(fs::file_size(filepath));
+
+                    clients[user_id]->files.push_back(file_info);
                 }
                 ++client_dir_iter;
             }
-            clients[dir_name] = client;
         }
         ++dir_iter;
     }

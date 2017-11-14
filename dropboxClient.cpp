@@ -18,6 +18,8 @@ std::mutex socket_mutex;
 // O id do usuário
 std::string user_id;
 
+fs::path user_dir;
+
 uint16_t port_number;
 
 // O endereço do servidor
@@ -43,6 +45,8 @@ int main(int argc, char **argv) {
         std::exit(1);
     }
 
+    create_sync_dir();
+    
     //sync_client();
 
     // Exibe a interface
@@ -266,6 +270,35 @@ void close_connection() {
 }
 
 void list_server_files() {
+    std::vector<FileInfo> server_files = get_server_files();
+
+    std::cout << "=====================\n";
+    std::cout << "Arquivos no servidor:\n";
+    std::cout << "=====================\n\n";
+    for (auto &file : server_files) {
+        std::cout << file.string() << "\n";
+    }
+}
+
+void list_client_files() {
+    fs::directory_iterator end_iter;
+    fs::directory_iterator(user_dir);
+}
+
+void create_sync_dir() {
+    fs::path home_dir(getenv("HOME"));
+    fs::path sync_dir("sync_dir_" + user_id);
+    fs::path fullpath = home_dir / sync_dir;
+    
+    // Global boost::filesystem::path
+    user_dir = fullpath;
+    
+    if (!fs::exists(fullpath)) {
+        fs::create_directory(fullpath);
+    }
+}
+
+std::vector<FileInfo> get_server_files() {
     std::lock_guard<std::mutex> lock(socket_mutex);
 
     // Envia o comando para listar os arquivos.
@@ -286,7 +319,5 @@ void list_server_files() {
         files.push_back(file_info);
     }
 
-    for (auto &file : files) {
-        std::cout << file.filename() << "\n";
-    }
+    return std::move(files);
 }

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <netinet/in.h>
 #include <memory.h>
+#include <sstream>
 
 //=============================================================================
 // Semaphore
@@ -108,6 +109,21 @@ size_t FileInfo::bytes() const {
     return bytes_;
 }
 
+std::string FileInfo::string() const {
+    char date_buffer[20];
+	
+    time_t date = last_modified();
+    strftime(date_buffer, 20, "%Y-%m-%d %H:%M:%S", localtime(&date));
+    
+    std::stringstream result;
+
+    result << "Nome: " << filename() << "\n"
+           << "Tamanho: " << bytes() << " bytes\n"
+           << "Modificado: " << date_buffer << "\n";
+
+    return result.str();
+}
+
 // Abstração da leitura do socket
 bool read_socket(int socket_fd, void *buffer, size_t count) {
     auto *ptr = (char *) buffer;
@@ -118,6 +134,7 @@ bool read_socket(int socket_fd, void *buffer, size_t count) {
         if (bytes < 1) {
             return false;
         }
+        ptr += bytes;
         bytes_read += bytes;
     }
     return true;
@@ -134,6 +151,7 @@ bool write_socket(int socket_fd, const void *buffer, size_t count) {
         if (bytes < 0) {
             return false;
         }
+        ptr += bytes;
         bytes_written += bytes;
     }
     return true;
