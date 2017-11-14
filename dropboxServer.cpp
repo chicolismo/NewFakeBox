@@ -333,6 +333,8 @@ void receive_file(std::string user_id, std::string filename, int client_socket_f
 // send_file {{{
 void send_file(std::string user_id, std::string filename, int client_socket_fd) {
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
+    
+    std::cout << "Filename " << filename << "\n";
 
     std::cout << "Localizando " << absolute_path.string() << " no servidor\n";
 
@@ -364,6 +366,15 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
         send_file(client_socket_fd, file, file_size);
     }
     fclose(file);
+    
+    std::cout << "Absolute Path: " << absolute_path.string() << "\n";
+    
+    time_t timestamp = fs::last_write_time(absolute_path);
+    std::cout << "Last write time a ser enviado: " << timestamp << "\n";
+    // Envia a data de modificação
+    write_socket(client_socket_fd, (const void *) &timestamp, sizeof(timestamp));
+    std::cout << "Data de criação enviada\n";
+    
 }
 // }}}
 

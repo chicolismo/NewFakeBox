@@ -10,10 +10,13 @@
 #include <sstream>
 #include <thread>
 #include <netdb.h>
+#include <set>
 
 namespace fs = boost::filesystem;
 
 std::mutex socket_mutex;
+std::mutex io_mutex;
+std::mutex sync_mutex;
 
 // O id do usuário
 std::string user_id;
@@ -46,8 +49,7 @@ int main(int argc, char **argv) {
     }
 
     create_sync_dir();
-    
-    //sync_client();
+    sync_client();
 
     // Exibe a interface
     run_interface();
@@ -148,7 +150,7 @@ void run_interface() {
         else if (command == "delete") {
             argument = input.substr(command.size() + 1);
             std::cout << "Delete " << argument << "\n";
-            //delete_file(argument);
+            delete_file(argument);
         }
         else if (command == "exit") {
             close_connection();
@@ -159,11 +161,11 @@ void run_interface() {
         }
         else if (command == "list_client") {
             std::cout << "ListClient\n";
-            //list_local_files();
+            list_local_files();
         }
         else if (command == "get_sync_dir") {
             std::cout << "GetSyncDir\n";
-            //sync_client();
+            sync_client();
         }
         else {
             std::cout << "Comando não reconhecido\n";
@@ -230,7 +232,12 @@ void send_file(std::string absolute_filename) {
 }
 
 void get_file(std::string filename) {
+    get_file(filename, true);
+}
+
+void get_file(std::string filename, bool current_path) {
     std::lock_guard<std::mutex> lock(socket_mutex);
+    //std::lock_guard<std::mutex> lock(io_mutex);
 
     Command command = Download;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
@@ -248,7 +255,13 @@ void get_file(std::string filename) {
 
     std::cout << "Tamanho do arquivo a receber: " << file_size << " bytes\n";
 
-    fs::path absolute_path = fs::current_path() / fs::path(filename);
+    fs::path absolute_path;
+    if (current_path) {
+        absolute_path = fs::current_path() / fs::path(filename);
+    } else {
+        absolute_path = user_dir / fs::path(filename);
+    }
+    
     FILE *file = fopen(absolute_path.c_str(), "wb");
     if (file == nullptr) {
         std::cout << "Erro ao abrir o arquivo para escrita\n";
@@ -259,6 +272,15 @@ void get_file(std::string filename) {
 
     read_file(socket_fd, file, file_size);
     fclose(file);
+    
+    std::cout << "Preparando-se para mudar a data do arquivo " << absolute_path.string() << "\n";
+    
+    time_t time;
+    read_socket(socket_fd, (void *) &time, sizeof(time));
+
+    std::cout << "Data recebida\n";
+    fs::last_write_time(absolute_path, time);
+   
 }
 
 void close_connection() {
@@ -280,9 +302,28 @@ void list_server_files() {
     }
 }
 
-void list_client_files() {
+void list_local_files() {
     fs::directory_iterator end_iter;
-    fs::directory_iterator(user_dir);
+    fs::directory_iterator dir_iter(user_dir);
+    
+    char date_buffer[20];
+    
+    std::cout << "====================\n";
+    std::cout << "Arquivos no cliente:\n";
+    std::cout << "====================\n\n";
+    while (dir_iter != end_iter) {
+        if (fs::is_regular_file(dir_iter->path())) {
+            
+            std::cout << "Nome: " << dir_iter->path().filename() << "\n";
+            std::cout << "Tamanho: " << fs::file_size(dir_iter->path()) << " bytes\n";
+            
+            time_t date = fs::last_write_time(dir_iter->path());
+            strftime(date_buffer, 20, "%Y-%m-%d %H:%M:%S", localtime(&date));
+            
+            std::cout << "Modificado: " << date_buffer << "\n\n";
+        }
+        ++dir_iter;
+    }
 }
 
 void create_sync_dir() {
@@ -320,4 +361,82 @@ std::vector<FileInfo> get_server_files() {
     }
 
     return std::move(files);
+}
+
+void delete_file(std::string filename) {
+    std::lock_guard<std::mutex> lock(io_mutex);
+
+    fs::path filepath = user_dir / fs::path(filename);
+
+    bool deleted = fs::remove(filepath);
+
+    if (deleted) {
+        std::cout << "Arquivo " << filename << " removido\n";
+        //send_delete_command(filename);
+    }
+    else {
+        std::cout << "Arquivo " << filename << " não existe no diretório de sincronização\n";
+    }
+}
+
+void sync_client() {
+    std::lock_guard<std::mutex> io_lock(io_mutex);
+    std::lock_guard<std::mutex> sync_lock(sync_mutex);
+    
+    std::vector<FileInfo> server_files = get_server_files();
+    
+    // Arquivos
+    std::set<std::string> files_on_server;
+    
+    std::set<std::string> files_to_send_to_server;
+    
+    for (FileInfo &file_info : server_files) {
+        fs::path absolute_path = user_dir / fs::path(file_info.filename());
+        
+        files_on_server.insert(file_info.filename());
+               
+        bool exists = fs::exists(absolute_path);
+        if ((exists && (fs::last_write_time(absolute_path) < file_info.last_modified())) || !exists) {
+            get_file(file_info.filename(), false);
+            
+        }
+        else {
+            if (fs::last_write_time(absolute_path) > file_info.last_modified()) {
+                fs::path filename = user_dir / fs::path(file_info.filename());
+                files_to_send_to_server.insert(filename.string());
+            }
+        }
+    }
+    
+    // Determina quais arquivos enviar para o servidor.   
+    fs::directory_iterator end_iter;
+    fs::directory_iterator dir_iter(user_dir);
+    while (dir_iter != end_iter) {
+        if (fs::is_regular_file(dir_iter->path())) {
+            std::string filename = dir_iter->path().filename().string();
+               
+            // Se o arquivo no diretório do cliente não existe nos arquivos
+            // enviados pelo servidor, devemos inserir seu nome para enviar. 
+            auto it = files_on_server.find(filename);
+            if (it == files_on_server.end()) {
+                files_to_send_to_server.insert(dir_iter->path().string());
+            }
+        }
+        ++dir_iter;
+    }
+    
+    /*
+    std::cout << "Arquivos no servidor\n";
+    for (auto &name : files_on_server) {
+        std::cout << name << "\n";
+    }
+    */
+    
+    std::cout << "\n\nArquivo para enviar para o servidor\n";
+    for (auto &filename : files_to_send_to_server) {
+        std::cout << "Enviando " << filename << " para o servidor\n";
+        send_file(filename);
+    }
+    
+    
 }

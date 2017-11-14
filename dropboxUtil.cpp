@@ -225,13 +225,19 @@ bool send_file(int to_socket_fd, FILE *in_file, size_t file_size) {
         }
         bzero(buffer, BUFFER_SIZE);
     }
+    bool ok = read_bool(to_socket_fd);
+    
+    if (ok) {
+        std::cout << "Arquivo enviado!\n";
+    } else {
+        std::cerr << "Deu merda\n";
+    }
 
-    std::cout << "Arquivo enviado!\n";
     return true;
 }
 
 bool read_file(int from_socket_fd, FILE *out_file, size_t file_size) {
-    std::cout << "Tamanho do arquivo: " << file_size << "\n";
+    //std::cout << "Tamanho do arquivo: " << file_size << "\n";
 
     char buffer[BUFFER_SIZE];
     bzero(buffer, BUFFER_SIZE);
@@ -243,7 +249,7 @@ bool read_file(int from_socket_fd, FILE *out_file, size_t file_size) {
 
         ssize_t bytes_read_from_socket = 0;
         while ((bytes_read_from_socket = recv(from_socket_fd, buffer, BUFFER_SIZE, 0)) > 0) {
-
+            
             // TODO: Temos que testar isto.
             ssize_t bytes_written_to_file = fwrite(buffer, sizeof(char), bytes_read_from_socket, out_file);
 
@@ -271,6 +277,8 @@ bool read_file(int from_socket_fd, FILE *out_file, size_t file_size) {
             return false;
         }
     }
+    
+    send_bool(from_socket_fd, true);
 
     std::cout << "Arquivo recebido!\n";
     return true;

@@ -29,4 +29,7 @@ void delete_file(std::string filename);
 
 void close_connection();
 
+
+
+void get_file(std::string filename, bool current_path);
 #endif
