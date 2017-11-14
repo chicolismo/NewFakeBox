@@ -159,7 +159,7 @@ void initialize_clients() {
 
 bool connect_client(std::string user_id, int client_socket_fd) {
     // Trava a função para apenas uma thread de cada vez.
-    std::lock_guard<std::mutex> lock(connection_mutex);
+    //std::lock_guard<std::mutex> lock(connection_mutex);
 
     bool ok = false;
 

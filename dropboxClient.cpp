@@ -196,8 +196,8 @@ void run_interface() {
 }
 
 void send_file(std::string absolute_filename) {
-    std::lock_guard<std::mutex> socket_lock(socket_mutex);
-    std::lock_guard<std::mutex> io_lock(io_mutex);
+    //std::lock_guard<std::mutex> socket_lock(socket_mutex);
+    //std::lock_guard<std::mutex> io_lock(io_mutex);
 
     ssize_t bytes;
     FILE *file;
@@ -258,8 +258,8 @@ void get_file(std::string filename) {
 }
 
 void get_file(std::string filename, bool current_path) {
-    std::lock_guard<std::mutex> socket_lock(socket_mutex);
-    std::lock_guard<std::mutex> io_lock(io_mutex);
+    //std::lock_guard<std::mutex> socket_lock(socket_mutex);
+    //std::lock_guard<std::mutex> io_lock(io_mutex);
 
     Command command = Download;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
@@ -306,7 +306,7 @@ void get_file(std::string filename, bool current_path) {
 }
 
 void close_connection() {
-    std::lock_guard<std::mutex> lock(socket_mutex);
+    //std::lock_guard<std::mutex> lock(socket_mutex);
 
     Command command = Exit;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
@@ -362,7 +362,7 @@ void create_sync_dir() {
 }
 
 std::vector<FileInfo> get_server_files() {
-    std::lock_guard<std::mutex> lock(socket_mutex);
+    //std::lock_guard<std::mutex> lock(socket_mutex);
 
     // Envia o comando para listar os arquivos.
     Command command = ListServer;
@@ -386,7 +386,7 @@ std::vector<FileInfo> get_server_files() {
 }
 
 void delete_file(std::string filename) {
-    std::lock_guard<std::mutex> lock(io_mutex);
+    //std::lock_guard<std::mutex> lock(io_mutex);
 
     fs::path filepath = user_dir / fs::path(filename);
 
@@ -402,7 +402,7 @@ void delete_file(std::string filename) {
 }
 
 void send_delete_command(std::string filename) {
-    std::lock_guard<std::mutex> lock(socket_mutex);
+    //std::lock_guard<std::mutex> lock(socket_mutex);
     
     Command command = Delete;
 
@@ -413,7 +413,7 @@ void send_delete_command(std::string filename) {
 }
 
 void sync_client() {
-    std::lock_guard<std::mutex> sync_lock(sync_mutex);
+    //std::lock_guard<std::mutex> sync_lock(sync_mutex);
     
     std::vector<FileInfo> server_files = get_server_files();
     
