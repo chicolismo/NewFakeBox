@@ -12,6 +12,7 @@ enum ConnectionResult { Success, Error };
 
 void print_interface();
 void run_interface();
+void run_sync_thread();
 
 void create_sync_dir();
 

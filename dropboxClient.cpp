@@ -7,6 +7,8 @@
 #include <strings.h>
 #include "dropboxServer.h"
 #include <boost/filesystem.hpp>
+#include "Inotify-master/FileSystemEvent.h"
+#include "Inotify-master/Inotify.h"
 #include <sstream>
 #include <thread>
 #include <netdb.h>
@@ -31,6 +33,9 @@ sockaddr_in server_address{};
 // Socket para se comunicar com o servidor.
 int socket_fd;
 
+// Objeto que vai ficar escutando mudancas no diretorio do cliente.
+Inotify inotify(IN_CREATE | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE | IN_CLOSE_WRITE);
+
 int main(int argc, char **argv) {
     if (argc < 4) {
         std::cerr << "Argumentos insuficientes\n";
@@ -50,9 +55,36 @@ int main(int argc, char **argv) {
 
     create_sync_dir();
     sync_client();
+    
+    // Manda a global inotify cuidar do diretório de sincronização
+    inotify.watchDirectoryRecursively(user_dir);
+
+    // Criação de thread de sincronização
+    std::thread thread;
+    thread = std::thread(run_sync_thread);
+    if (!thread.joinable()) {
+        std::cerr << "Erro ao criar thread de sincronização\n";
+        close_connection();
+        return 1;
+    }
+    thread.detach();
 
     // Exibe a interface
     run_interface();
+}
+
+void run_sync_thread() {
+    while (true) {
+        FileSystemEvent event = inotify.getNextEvent();
+
+        if (event.mask & IN_DELETE || event.mask & IN_MOVED_FROM) {
+            //send_delete_command(event.path.filename().string());
+        }
+        //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE || event.mask & IN_MOVED_TO) {
+        else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
+            send_file(event.path.string());
+        }
+    }
 }
 
 ConnectionResult connect_server(std::string hostname, uint16_t port) {
@@ -87,18 +119,6 @@ ConnectionResult connect_server(std::string hostname, uint16_t port) {
         std::cerr << "Erro enviando o tipo de conexão ao servidor";
         return ConnectionResult::Error;
     }
-
-    /*
-    size_t size = user_id.size() + 1;
-    char buffer[size];
-    bzero((void *) buffer, size);
-    std::strcpy(buffer, user_id.c_str());
-    buffer[size] = '\0';
-    // Envia o tamanho do user_id
-    write_socket(socket_fd, (const void *) &size, sizeof(size));
-    // Envia o user_id
-    write_socket(socket_fd, (const void *) buffer, size);
-     */
 
     send_string(socket_fd, user_id);
 
