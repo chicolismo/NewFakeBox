@@ -78,7 +78,7 @@ void run_sync_thread() {
         FileSystemEvent event = inotify.getNextEvent();
 
         if (event.mask & IN_DELETE || event.mask & IN_MOVED_FROM) {
-            send_delete_command(event.path.filename().string());
+            //send_delete_command(event.path.filename().string());
         }
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE || event.mask & IN_MOVED_TO) {
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
