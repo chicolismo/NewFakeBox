@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
     // Inicializa os clientes
     initialize_clients();
 
-    std::cout << "O servidor está aguarando conexões na porta " << port_number << "\n";
+    std::cout << "O servidor está aguardando conexões na porta " << port_number << "\n";
 
     // Aguardando conexões
     while (true) {

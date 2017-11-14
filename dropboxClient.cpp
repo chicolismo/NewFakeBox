@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
     }
 
     create_sync_dir();
-    sync_client();
+    //sync_client();
     
     // Manda a global inotify cuidar do diretório de sincronização
     inotify.watchDirectoryRecursively(user_dir);
@@ -196,7 +196,8 @@ void run_interface() {
 }
 
 void send_file(std::string absolute_filename) {
-    std::lock_guard<std::mutex> lock(socket_mutex);
+    std::lock_guard<std::mutex> socket_lock(socket_mutex);
+    std::lock_guard<std::mutex> io_lock(io_mutex);
 
     ssize_t bytes;
     FILE *file;
@@ -258,7 +259,7 @@ void get_file(std::string filename) {
 
 void get_file(std::string filename, bool current_path) {
     std::lock_guard<std::mutex> lock(socket_mutex);
-    //std::lock_guard<std::mutex> lock(io_mutex);
+    std::lock_guard<std::mutex> lock(io_mutex);
 
     Command command = Download;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
