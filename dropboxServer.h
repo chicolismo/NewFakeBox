@@ -19,4 +19,7 @@ void run_user_interface(const std::string user_id, int client_socket_fd);
 
 void send_file_infos(std::string user_id, int client_socket_fd);
 
+void lock_user(std::string user_id);
+void unlock_user(std::string user_id);
+
 #endif

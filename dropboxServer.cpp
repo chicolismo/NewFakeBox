@@ -21,7 +21,9 @@ fs::path server_dir;
 uint16_t port_number;
 sockaddr_in address{};
 ClientDict clients;
+
 std::mutex connection_mutex;
+std::mutex user_lock_mutex;
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -93,12 +95,9 @@ int main(int argc, char **argv) {
         }
 
     }
-
     close(socket_fd);
-
-    /*
-    */
 }
+
 
 void run_normal_thread(int client_socket_fd) {
     // Temos que ler o user_id
@@ -122,6 +121,7 @@ void run_normal_thread(int client_socket_fd) {
     return;
 }
 
+
 void initialize_clients() {
     fs::directory_iterator end_iter;
     fs::directory_iterator dir_iter(server_dir);
@@ -137,17 +137,11 @@ void initialize_clients() {
             while (client_dir_iter != end_iter) {
                 if (fs::is_regular_file(client_dir_iter->path())) {
                     FileInfo file_info;
-
                     fs::path filepath(client_dir_iter->path());
-
                     file_info.set_filename(filepath.filename().string());
-
                     file_info.set_extension(fs::extension(filepath));
-
                     file_info.set_last_modified(fs::last_write_time(filepath));
-
                     file_info.set_bytes(fs::file_size(filepath));
-
                     clients[user_id]->files.push_back(file_info);
                 }
                 ++client_dir_iter;
@@ -157,9 +151,11 @@ void initialize_clients() {
     }
 }
 
+
 bool connect_client(std::string user_id, int client_socket_fd) {
+
     // Trava a função para apenas uma thread de cada vez.
-    //std::lock_guard<std::mutex> lock(connection_mutex);
+    std::lock_guard<std::mutex> lock(connection_mutex);
 
     bool ok = false;
 
@@ -191,7 +187,12 @@ bool connect_client(std::string user_id, int client_socket_fd) {
     return ok;
 }
 
+
+// disconnect_client {{{
 void disconnect_client(std::string user_id, int client_socket_fd) {
+
+    std::lock_guard<std::mutex> lock(connection_mutex);
+    
     auto it = clients.find(user_id);
 
     if (it == clients.end()) {
@@ -215,24 +216,37 @@ void disconnect_client(std::string user_id, int client_socket_fd) {
         else {
             it->second->connected_devices[1] = EMPTY_DEVICE;
         }
-        //close(client_socket_fd);
+        close(client_socket_fd);
     }
-
 }
+// }}}
 
+
+// create_user_dir {{{
+// 
+// Cria o diretório do usuário no servidor, caso não exista.
+// 
 void create_user_dir(std::string user_id) {
-    // Novo usuário
     fs::path user_dir = server_dir / fs::path(user_id);
     if (!fs::exists(user_dir)) {
         fs::create_directory(user_dir);
     }
 }
+// }}}
 
+
+// run_user_interface {{{
+//
+// Aguarda comandos do usuário
+//
 void run_user_interface(const std::string user_id, int client_socket_fd) {
     Command command = Exit;
 
     do {
         read_socket(client_socket_fd, (void *) &command, sizeof(command));
+
+        // uma vez recebido o comando, devemos travar o usuário
+        lock_user(user_id);
 
         std::string filename{};
 
@@ -276,12 +290,19 @@ void run_user_interface(const std::string user_id, int client_socket_fd) {
             break;
         }
 
+        unlock_user(user_id);
     }
     while (command != Exit);
 }
+// }}}
+
 
 // receive_file {{{
+//
+// Recebe um arquivo do usuário.
+//
 void receive_file(std::string user_id, std::string filename, int client_socket_fd) {
+    lock_user(user_id);
 
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
 
@@ -332,8 +353,14 @@ void receive_file(std::string user_id, std::string filename, int client_socket_f
 }
 // }}}
 
+
 // send_file {{{
+// 
+// Envia um arquivo para um usuário
+//
 void send_file(std::string user_id, std::string filename, int client_socket_fd) {
+    lock_user(user_id);
+
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
     
     std::cout << "Filename " << filename << "\n";
@@ -377,10 +404,18 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
     write_socket(client_socket_fd, (const void *) &timestamp, sizeof(timestamp));
     std::cout << "Data de criação enviada\n";
     
+    unlock_user(user_id);
 }
 // }}}
 
+
+// delete_file {{{
+//
+// Exclui no servidor o arquivo cujo nome foi passado pelo usuário
+//
 void delete_file(std::string user_id, std::string filename, int client_socket_fd) {
+    lock_user(user_id);
+
     auto it = clients.find(user_id);
     if (it == clients.end()) {
         return;
@@ -413,7 +448,11 @@ void delete_file(std::string user_id, std::string filename, int client_socket_fd
     else {
         std::cout << "Arquivo " << full_path << " não existe\n";
     }
+
+    unlock_user(user_id);
 }
+// }}}
+
 
 void update_files(std::string user_id, std::string filename, size_t file_size, time_t timestamp) {
     auto it = clients.find(user_id);
@@ -468,4 +507,24 @@ void send_file_infos(std::string user_id, int client_socket_fd) {
         write_socket(client_socket_fd, (const void *) &client->files[i], sizeof(client->files[i]));
     }
 
+}
+
+void lock_user(std::string user_id) {
+    std::lock_guard<std::mutex> lock(user_lock_mutex);
+
+    auto it = clients.find(user_id);
+    if (it != nullptr) {
+        it->second->user_mutex.lock();
+        //it->second->sem.wait();
+    }
+}
+
+void unlock_user(std::string user_id) {
+    std::lock_guard<std::mutex> lock(user_lock_mutex);
+
+    auto it = clients.find(user_id);
+    if (it != nullptr) {
+        it->second->user_mutex.unlock();
+        //it->second->sem.notify();
+    }
 }

@@ -16,15 +16,17 @@
 
 namespace fs = boost::filesystem;
 
-std::mutex socket_mutex;
-std::mutex io_mutex;
-std::mutex sync_mutex;
+// O mutex de envio de comandos ao servidor.
+// Apenas uma thread de cada vez poderá enviar comandos.
+std::mutex command_mutex;
 
 // O id do usuário
 std::string user_id;
 
+// O diretório local do usuário
 fs::path user_dir;
 
+// O número da porta do servidor
 uint16_t port_number;
 
 // O endereço do servidor
@@ -73,20 +75,34 @@ int main(int argc, char **argv) {
     run_interface();
 }
 
+
 void run_sync_thread() {
     while (true) {
         FileSystemEvent event = inotify.getNextEvent();
 
+        // Testa quais dos dois deve ser o evento certo
         if (event.mask & IN_DELETE || event.mask & IN_MOVED_FROM) {
-            //send_delete_command(event.path.filename().string());
+
+            // trava os comandos
+            std::lock_guard<std::mutex> lock(command_mutex);
+            send_delete_command(event.path.filename().string());
+            // destrava
+            
         }
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE || event.mask & IN_MOVED_TO) {
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
         else if (event.mask & IN_CLOSE_WRITE) {
-            //send_file(event.path.string());
+
+            // trava os comandos
+            std::lock_guard<std::mutex> lock(command_mutex);
+
+            send_file(event.path.string());
+
+            // destrava os comandos
         }
     }
 }
+
 
 ConnectionResult connect_server(std::string hostname, uint16_t port) {
     hostent *server = gethostbyname(hostname.c_str());
@@ -156,6 +172,10 @@ void run_interface() {
     do {
         print_interface();
         std::getline(std::cin, input);
+
+        // Trava o mutex de comando
+        std::lock_guard<std::mutex> lock(command_mutex);
+
         command = input.substr(0, input.find(delim));
 
         if (command == "upload") {
@@ -191,14 +211,14 @@ void run_interface() {
         else {
             std::cout << "Comando não reconhecido\n";
         }
+
+        // Destrava o mutex de comando
     }
     while (command != "exit");
 }
 
-void send_file(std::string absolute_filename) {
-    //std::lock_guard<std::mutex> socket_lock(socket_mutex);
-    //std::lock_guard<std::mutex> io_lock(io_mutex);
 
+void send_file(std::string absolute_filename) {
     ssize_t bytes;
     FILE *file;
 
@@ -253,13 +273,13 @@ void send_file(std::string absolute_filename) {
     }
 }
 
+
 void get_file(std::string filename) {
     get_file(filename, true);
 }
 
+
 void get_file(std::string filename, bool current_path) {
-    //std::lock_guard<std::mutex> socket_lock(socket_mutex);
-    //std::lock_guard<std::mutex> io_lock(io_mutex);
 
     Command command = Download;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
@@ -305,14 +325,24 @@ void get_file(std::string filename, bool current_path) {
    
 }
 
-void close_connection() {
-    //std::lock_guard<std::mutex> lock(socket_mutex);
 
+// close_connection {{{
+//
+// Desconecta o usuário do servidor e fecha o socket.  Encerra o programa.
+//
+void close_connection() {
     Command command = Exit;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
     close(socket_fd);
 }
+// }}}
 
+
+// list_server_files {{{
+//
+// Imprime informações dos arquivos presentes no diretório do usuário no
+// servidor.
+//
 void list_server_files() {
     std::vector<FileInfo> server_files = get_server_files();
 
@@ -323,7 +353,13 @@ void list_server_files() {
         std::cout << file.string() << "\n";
     }
 }
+// }}}
 
+
+// list_local_files {{{
+//
+// Imprime informações dos arquivos locais
+//
 void list_local_files() {
     fs::directory_iterator end_iter;
     fs::directory_iterator dir_iter(user_dir);
@@ -347,7 +383,14 @@ void list_local_files() {
         ++dir_iter;
     }
 }
+// }}}
 
+
+// create_sync_dir {{{
+//
+// Cria o diretório de sincronização no diretório do usuário.  Também define a
+// global "user_dir" que referencia esse diretório.
+//
 void create_sync_dir() {
     fs::path home_dir(getenv("HOME"));
     fs::path sync_dir("sync_dir_" + user_id);
@@ -360,9 +403,16 @@ void create_sync_dir() {
         fs::create_directory(fullpath);
     }
 }
+// }}}
 
+
+//  get_server_files {{{
+//
+//  Retorna um vetor contendo as informações dos arquivos existentes no
+//  servidor.  Os dados podem ser usados para imprimir os arquivos existentes
+//  no servidor ou para fazer a sincronização.
+//
 std::vector<FileInfo> get_server_files() {
-    //std::lock_guard<std::mutex> lock(socket_mutex);
 
     // Envia o comando para listar os arquivos.
     Command command = ListServer;
@@ -384,26 +434,39 @@ std::vector<FileInfo> get_server_files() {
 
     return std::move(files);
 }
+// }}}
 
+
+// delete_file {{{
+//
+// Apaga um arquivo localmente.
+//
+// A thread do INotify se encarregará de enviar o comando de "delete" para o
+// servidor quando o arquivo for excluído localmente.
+//
 void delete_file(std::string filename) {
-    //std::lock_guard<std::mutex> lock(io_mutex);
-
     fs::path filepath = user_dir / fs::path(filename);
 
     bool deleted = fs::remove(filepath);
 
     if (deleted) {
         std::cout << "Arquivo " << filename << " removido\n";
-        //send_delete_command(filename);
+        // send_delete_command(filename);
     }
     else {
         std::cout << "Arquivo " << filename << " não existe no diretório de sincronização\n";
     }
 }
+// }}}
 
+
+// send_delete_command {{{
+//
+// Envia o comando Delete ao servidor.
+//
+// Esta função deve ser chamada pela thread do INotify
+//
 void send_delete_command(std::string filename) {
-    //std::lock_guard<std::mutex> lock(socket_mutex);
-    
     Command command = Delete;
 
     // Envia o comando de Delete para o servidor
@@ -411,15 +474,23 @@ void send_delete_command(std::string filename) {
         send_string(socket_fd, filename);
     }
 }
+// }}}
 
+
+// sync_client {{{
+//
+// Sincroniza os arquivos do cliente com os do servidor, e vice-versa
+//
+// A função é implementada enviando diversos comandos ao servidor.
+//
 void sync_client() {
-    //std::lock_guard<std::mutex> sync_lock(sync_mutex);
-    
+
     std::vector<FileInfo> server_files = get_server_files();
     
-    // Arquivos
+    // Arquivos no servidor
     std::set<std::string> files_on_server;
     
+    // Arquivos para enviar para o servidor
     std::set<std::string> files_to_send_to_server;
     
     for (FileInfo &file_info : server_files) {
@@ -432,11 +503,12 @@ void sync_client() {
             get_file(file_info.filename(), false);
             
         }
-        else {
-            if (fs::last_write_time(absolute_path) > file_info.last_modified()) {
-                fs::path filename = user_dir / fs::path(file_info.filename());
-                files_to_send_to_server.insert(filename.string());
-            }
+        else if (fs::last_write_time(absolute_path) > file_info.last_modified()) {
+            // Se o arquivo local é mais novo do que o do servidor, ele
+            // deve ser enviado para o servidor.
+
+            fs::path filename = user_dir / fs::path(file_info.filename());
+            files_to_send_to_server.insert(filename.string());
         }
     }
     
@@ -457,18 +529,10 @@ void sync_client() {
         ++dir_iter;
     }
     
-    /*
-    std::cout << "Arquivos no servidor\n";
-    for (auto &name : files_on_server) {
-        std::cout << name << "\n";
-    }
-    */
-    
     std::cout << "\n\nArquivo para enviar para o servidor\n";
     for (auto &filename : files_to_send_to_server) {
         std::cout << "Enviando " << filename << " para o servidor\n";
         send_file(filename);
     }
-    
-    
 }
+// }}}

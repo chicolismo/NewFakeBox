@@ -60,7 +60,10 @@ struct Client {
     bool is_logged;
     int connected_devices[MAX_DEVICES];
     std::vector<FileInfo> files;
-    Semaphore sem;
+
+    //Semaphore sem;
+
+    std::mutex user_mutex;
 
     // Methods
     explicit Client(std::string user_id);
