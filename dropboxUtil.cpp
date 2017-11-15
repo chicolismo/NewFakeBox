@@ -130,7 +130,7 @@ bool read_socket(int socket_fd, void *buffer, size_t count) {
 
     ssize_t bytes_read = 0;
     while (bytes_read < count) {
-        ssize_t bytes = recv(socket_fd, ptr, count, 0);
+        ssize_t bytes = recv(socket_fd, ptr, count - bytes_read, 0);
         if (bytes < 1) {
             return false;
         }
@@ -147,7 +147,7 @@ bool write_socket(int socket_fd, const void *buffer, size_t count) {
 
     ssize_t bytes_written = 0;
     while (bytes_written < count) {
-        ssize_t bytes = send(socket_fd, ptr, count, 0);
+        ssize_t bytes = send(socket_fd, ptr, count - bytes_written, 0);
         if (bytes < 0) {
             return false;
         }
