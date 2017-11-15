@@ -302,7 +302,6 @@ void run_user_interface(const std::string user_id, int client_socket_fd) {
 // Recebe um arquivo do usuário.
 //
 void receive_file(std::string user_id, std::string filename, int client_socket_fd) {
-    lock_user(user_id);
 
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
 
@@ -359,7 +358,6 @@ void receive_file(std::string user_id, std::string filename, int client_socket_f
 // Envia um arquivo para um usuário
 //
 void send_file(std::string user_id, std::string filename, int client_socket_fd) {
-    lock_user(user_id);
 
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
     
@@ -404,7 +402,6 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
     write_socket(client_socket_fd, (const void *) &timestamp, sizeof(timestamp));
     std::cout << "Data de criação enviada\n";
     
-    unlock_user(user_id);
 }
 // }}}
 
@@ -414,7 +411,6 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
 // Exclui no servidor o arquivo cujo nome foi passado pelo usuário
 //
 void delete_file(std::string user_id, std::string filename, int client_socket_fd) {
-    lock_user(user_id);
 
     auto it = clients.find(user_id);
     if (it == clients.end()) {
@@ -449,7 +445,6 @@ void delete_file(std::string user_id, std::string filename, int client_socket_fd
         std::cout << "Arquivo " << full_path << " não existe\n";
     }
 
-    unlock_user(user_id);
 }
 // }}}
 
@@ -487,6 +482,12 @@ void update_files(std::string user_id, std::string filename, size_t file_size, t
     }
 }
 
+
+// send_file_infos {{{
+//
+// Envia um vetor de FileInfo para o usuário. Esse vetor contém todas as
+// informações sobre os arquivos presentes do diretório do usuário.
+//
 void send_file_infos(std::string user_id, int client_socket_fd) {
     auto it = clients.find(user_id);
 
@@ -506,9 +507,14 @@ void send_file_infos(std::string user_id, int client_socket_fd) {
     for (int i = 0; i < n; ++i) {
         write_socket(client_socket_fd, (const void *) &client->files[i], sizeof(client->files[i]));
     }
-
 }
+// }}}
 
+
+// lock_user {{{
+//
+// Trava todas as outras threads de um mesmo usuário.
+//
 void lock_user(std::string user_id) {
     std::lock_guard<std::mutex> lock(user_lock_mutex);
 
@@ -518,7 +524,13 @@ void lock_user(std::string user_id) {
         //it->second->sem.wait();
     }
 }
+// }}}
 
+
+// unlock_user {{{
+//
+// Destrava as threads do usuário.
+//
 void unlock_user(std::string user_id) {
     std::lock_guard<std::mutex> lock(user_lock_mutex);
 
@@ -528,3 +540,4 @@ void unlock_user(std::string user_id) {
         //it->second->sem.notify();
     }
 }
+// }}}

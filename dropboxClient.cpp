@@ -59,17 +59,17 @@ int main(int argc, char **argv) {
     sync_client();
     
     // Manda a global inotify cuidar do diretório de sincronização
-    //inotify.watchDirectoryRecursively(user_dir);
+    inotify.watchDirectoryRecursively(user_dir);
 
     // Criação de thread de sincronização
-    //std::thread thread;
-    //thread = std::thread(run_sync_thread);
-    //if (!thread.joinable()) {
-    //    std::cerr << "Erro ao criar thread de sincronização\n";
-    //    close_connection();
-    //    return 1;
-    //}
-    //thread.detach();
+    std::thread thread;
+    thread = std::thread(run_sync_thread);
+    if (!thread.joinable()) {
+        std::cerr << "Erro ao criar thread de sincronização\n";
+        close_connection();
+        return 1;
+    }
+    thread.detach();
 
     // Exibe a interface
     run_interface();
