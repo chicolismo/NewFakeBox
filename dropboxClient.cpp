@@ -81,7 +81,8 @@ void run_sync_thread() {
         FileSystemEvent event = inotify.getNextEvent();
 
         // Testa quais dos dois deve ser o evento certo
-        if (event.mask & IN_DELETE || event.mask & IN_MOVED_FROM) {
+        //if (event.mask & IN_DELETE || event.mask & IN_MOVED_FROM) {
+        if (event.mask & IN_MOVED_FROM) {
 
             // trava os comandos
             std::lock_guard<std::mutex> lock(command_mutex);
@@ -91,7 +92,7 @@ void run_sync_thread() {
         }
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE || event.mask & IN_MOVED_TO) {
         //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
-        else if (event.mask & IN_CLOSE_WRITE) {
+        else if (event.mask & IN_MOVED_TO) {
 
             // trava os comandos
             std::lock_guard<std::mutex> lock(command_mutex);
@@ -442,7 +443,7 @@ std::vector<FileInfo> get_server_files() {
 // Apaga um arquivo localmente.
 //
 // A thread do INotify se encarregará de enviar o comando de "delete" para o
-// servidor quando o arquivo for excluído localmente.
+// servidor quando o arquivo for movido localmente.
 //
 void delete_file(std::string filename) {
     fs::path filepath = user_dir / fs::path(filename);
@@ -451,7 +452,7 @@ void delete_file(std::string filename) {
 
     if (deleted) {
         std::cout << "Arquivo " << filename << " removido\n";
-        // send_delete_command(filename);
+        send_delete_command(filename);
     }
     else {
         std::cout << "Arquivo " << filename << " não existe no diretório de sincronização\n";
