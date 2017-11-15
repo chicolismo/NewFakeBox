@@ -513,7 +513,7 @@ void lock_user(std::string user_id) {
     std::lock_guard<std::mutex> lock(user_lock_mutex);
 
     auto it = clients.find(user_id);
-    if (it != nullptr) {
+    if (it != clients.end()) {
         it->second->user_mutex.lock();
         //it->second->sem.wait();
     }
@@ -523,7 +523,7 @@ void unlock_user(std::string user_id) {
     std::lock_guard<std::mutex> lock(user_lock_mutex);
 
     auto it = clients.find(user_id);
-    if (it != nullptr) {
+    if (it != clients.end()) {
         it->second->user_mutex.unlock();
         //it->second->sem.notify();
     }
