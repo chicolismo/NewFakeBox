@@ -11,6 +11,7 @@
 #include "Inotify-master/Inotify.h"
 #include <sstream>
 #include <thread>
+#include <chrono>
 #include <netdb.h>
 #include <set>
 
@@ -56,20 +57,32 @@ int main(int argc, char **argv) {
     }
 
     create_sync_dir();
-    sync_client();
+    //sync_client();
     
     // Manda a global inotify cuidar do diretório de sincronização
     inotify.watchDirectoryRecursively(user_dir);
 
+    // Cria thread para mater o cliente sincronizado com o servidor.
+    std::thread get_dir_sync_thread;
+    get_dir_sync_thread = std::thread(run_get_sync_dir_thread);
+    if (!get_dir_sync_thread.joinable()) {
+        std::cerr << "Erro ao criar thread de get_dir_sync\n";
+        close_connection();
+        return 1;
+    };
+    get_dir_sync_thread.detach();
+
+
     // Criação de thread de sincronização
-    std::thread thread;
-    thread = std::thread(run_sync_thread);
-    if (!thread.joinable()) {
+    std::thread sync_thread;
+    sync_thread = std::thread(run_sync_thread);
+    if (!sync_thread.joinable()) {
         std::cerr << "Erro ao criar thread de sincronização\n";
         close_connection();
         return 1;
     }
-    thread.detach();
+    sync_thread.detach();
+
 
     // Exibe a interface
     run_interface();
@@ -93,6 +106,14 @@ void run_sync_thread() {
             send_file(event.path.string());
             // destrava os comandos
         }
+    }
+}
+
+void run_get_sync_dir_thread() {
+    while (true) {
+        std::lock_guard<std::mutex> lock(command_mutex);
+        sync_client();
+        std::this_thread::sleep_for(std::chrono::seconds(5));
     }
 }
 
@@ -144,6 +165,9 @@ ConnectionResult connect_server(std::string hostname, uint16_t port) {
 }
 
 
+// print_interface {{{
+//
+//
 void print_interface() {
     std::cout << "Digite o comando:\n";
     std::cout << "\tupload <path/filename.ext>\n";
@@ -154,8 +178,12 @@ void print_interface() {
     std::cout << "\tget_sync_dir\n";
     std::cout << "\texit\n";
 }
+// }}}
 
 
+// run_interface {{{
+//
+//
 void run_interface() {
     std::string delim(" ");
     std::string input;
@@ -209,8 +237,12 @@ void run_interface() {
     }
     while (command != "exit");
 }
+// }}}
 
 
+// send_file {{{
+//
+//
 void send_file(std::string absolute_filename) {
     ssize_t bytes;
     FILE *file;
@@ -265,8 +297,10 @@ void send_file(std::string absolute_filename) {
         std::cerr << "Arquivo " << absolute_filename << " não existe\n";
     }
 }
+// }}}
 
 
+// get_file {{{
 void get_file(std::string filename) {
     get_file(filename, true);
 }
@@ -317,6 +351,7 @@ void get_file(std::string filename, bool current_path) {
     fs::last_write_time(absolute_path, time);
    
 }
+// }}}
 
 
 // close_connection {{{
@@ -477,7 +512,6 @@ void send_delete_command(std::string filename) {
 // A função é implementada enviando diversos comandos ao servidor.
 //
 void sync_client() {
-
     std::vector<FileInfo> server_files = get_server_files();
     
     // Arquivos no servidor
@@ -522,9 +556,9 @@ void sync_client() {
         ++dir_iter;
     }
     
-    std::cout << "\n\nArquivo para enviar para o servidor\n";
+    //std::cout << "\n\nArquivo para enviar para o servidor\n";
     for (auto &filename : files_to_send_to_server) {
-        std::cout << "Enviando " << filename << " para o servidor\n";
+        //std::cout << "Enviando " << filename << " para o servidor\n";
         send_file(filename);
     }
 }
