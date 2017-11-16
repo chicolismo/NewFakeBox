@@ -81,24 +81,16 @@ void run_sync_thread() {
         FileSystemEvent event = inotify.getNextEvent();
 
         // Testa quais dos dois deve ser o evento certo
-        //if (event.mask & IN_DELETE || event.mask & IN_MOVED_FROM) {
-        if (event.mask & IN_MOVED_FROM) {
-
+        if (event.mask & IN_MOVED_FROM || event.mask & IN_DELETE) {
             // trava os comandos
             std::lock_guard<std::mutex> lock(command_mutex);
             send_delete_command(event.path.filename().string());
-            // destrava
-            
+            // destrava os comandos
         }
-        //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE || event.mask & IN_MOVED_TO) {
-        //else if (event.mask & IN_CLOSE_WRITE || event.mask & IN_CREATE) {
-        else if (event.mask & IN_MOVED_TO) {
-
+        else if (event.mask & IN_MOVED_TO || event.mask & IN_CREATE || event.mask & IN_CLOSE_WRITE) {
             // trava os comandos
             std::lock_guard<std::mutex> lock(command_mutex);
-
             send_file(event.path.string());
-
             // destrava os comandos
         }
     }
@@ -452,7 +444,7 @@ void delete_file(std::string filename) {
 
     if (deleted) {
         std::cout << "Arquivo " << filename << " removido\n";
-        send_delete_command(filename);
+        //send_delete_command(filename);
     }
     else {
         std::cout << "Arquivo " << filename << " não existe no diretório de sincronização\n";
