@@ -14,39 +14,6 @@
 #include <sstream>
 
 //=============================================================================
-// Semaphore
-//=============================================================================
-
-// V(s)
-void Semaphore::notify() {
-    std::unique_lock<decltype(mutex_)> lock(mutex_);
-    ++count_;
-    condition_.notify_one();
-}
-
-// P(s)
-void Semaphore::wait() {
-    std::unique_lock<decltype(mutex_)> lock(mutex_);
-
-    while (!count_) {
-        // Handle spurious wake-ups.
-        condition_.wait(lock);
-    }
-    --count_;
-}
-
-bool Semaphore::try_wait() {
-    std::unique_lock<decltype(mutex_)> lock(mutex_);
-
-    if (count_ > 0) {
-        --count_;
-        return true;
-    }
-    return false;
-}
-
-
-//=============================================================================
 // Client
 //=============================================================================
 Client::Client(std::string user_id) {

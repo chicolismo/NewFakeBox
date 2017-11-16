@@ -14,20 +14,7 @@
 
 enum ConnectionType { Normal, Sync };
 
-enum Command { Upload, Download, Delete, ListServer, ListClient, GetSyncDir, Exit };
-
-class Semaphore {
-    std::mutex mutex_;
-    std::condition_variable condition_;
-    // Apenas uma thread de cada cliente pode passar pelo semáforo
-    unsigned long count_ = 1;
-
-public:
-    void notify();
-    void wait();
-    bool try_wait();
-};
-
+enum Command { Upload, Download, Delete, ListServer, Exit };
 
 struct FileInfo {
     char filename_[MAX_NAME_SIZE];

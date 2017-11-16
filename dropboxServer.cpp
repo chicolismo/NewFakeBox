@@ -25,6 +25,20 @@ ClientDict clients;
 std::mutex connection_mutex;
 std::mutex user_lock_mutex;
 
+/*
+ * -----------------------------------------------------------------------------
+ * main
+ * -----------------------------------------------------------------------------
+ * A função main espera 1 argumento que é em qual porta o servidor vai rodar
+ *
+ * Ela também fica escutando novas conexões ao seu socket e para cada nova
+ * conexão cria uma thread nova.
+ *
+ * Essa thread se encarrega de escutar e responder a comandos do cliente.  O
+ * socket do cliente é passado a essa thread.  Outras conexões ficam sendo
+ * aguardadas.
+ * -----------------------------------------------------------------------------
+ */
 int main(int argc, char **argv) {
     if (argc < 2) {
         std::cerr << "Informe a porta\n";
@@ -99,7 +113,22 @@ int main(int argc, char **argv) {
 }
 
 
+/*
+ * -----------------------------------------------------------------------------
+ *  run_normal_thread
+ * -----------------------------------------------------------------------------
+ *
+ * Recebe um novo socket e lê o user_id da nova conexão.
+ *
+ * Tenta fazer a conexão e em caso de sucesso fica manda o socket para a função
+ * que escuta pelos comandos do usuário
+ *
+ * No caso da conexão ser mal sucedida, envia a informação para o cliente e
+ * encerra a thread.
+ * ----------------------------------------------------------------------------
+ */
 void run_normal_thread(int client_socket_fd) {
+
     // Temos que ler o user_id
     std::string user_id = receive_string(client_socket_fd);
 
@@ -122,6 +151,21 @@ void run_normal_thread(int client_socket_fd) {
 }
 
 
+/*
+ * ----------------------------------------------------------------------------
+ * initialize_clients
+ * ----------------------------------------------------------------------------
+ * Inicializa o dicionário de clientes.
+ *
+ * O diretório local onde o servidor está sendo executado é percorrido em busca
+ * de subdiretórios.  Cada subdiretório é considerado como sendo um cliente, e
+ * seus arquivos, os arquivos do cliente.
+ *
+ * A variável "clients" é uma global do tipo "std::map<std::string, Client*>",
+ * ou seja, é um dicionário de chaves do tipo "strings" e valores do tipo
+ * ponteiro de "Client".
+ * ----------------------------------------------------------------------------
+ */
 void initialize_clients() {
     fs::directory_iterator end_iter;
     fs::directory_iterator dir_iter(server_dir);
@@ -152,8 +196,20 @@ void initialize_clients() {
 }
 
 
+/*
+ * ----------------------------------------------------------------------------
+ * connect_client
+ * ----------------------------------------------------------------------------
+ * Conecta o novo cliente, se já não houver outros 2 dispositivos desse
+ * mesmo cliente conectados.
+ *
+ * Essa função só permite uma thread de cada vez, pois manipula uma variável
+ * global.
+ *
+ * Retorna um booleano indicando o sucesso da conexão.
+ * ----------------------------------------------------------------------------
+ */
 bool connect_client(std::string user_id, int client_socket_fd) {
-
     // Trava a função para apenas uma thread de cada vez.
     std::lock_guard<std::mutex> lock(connection_mutex);
 
@@ -177,22 +233,23 @@ bool connect_client(std::string user_id, int client_socket_fd) {
             }
         }
     }
-
-    std::cout << "Imprimindo arquivos do cliente\n";
-    it = clients.find(user_id);
-    for (auto &file : it->second->files) {
-        std::cout << file.filename() << "\n";
-    }
-
     return ok;
 }
 
 
-// disconnect_client {{{
+/*
+ * ----------------------------------------------------------------------------
+ * disconnect_client
+ * ----------------------------------------------------------------------------
+ * Encerra a conexão do cliente e fecha seu socket.
+ *
+ * Essa função só permite uma thread de cada vez, pois manipula uma variável
+ * global.
+ * ----------------------------------------------------------------------------
+ */
 void disconnect_client(std::string user_id, int client_socket_fd) {
-
     std::lock_guard<std::mutex> lock(connection_mutex);
-    
+
     auto it = clients.find(user_id);
 
     if (it == clients.end()) {
@@ -219,26 +276,46 @@ void disconnect_client(std::string user_id, int client_socket_fd) {
         close(client_socket_fd);
     }
 }
-// }}}
 
 
-// create_user_dir {{{
-// 
-// Cria o diretório do usuário no servidor, caso não exista.
-// 
+/*
+ * -----------------------------------------------------------------------------
+ * create_user_dir
+ * -----------------------------------------------------------------------------
+ * Cria o diretório do usuário no servidor, caso não exista.
+ * -----------------------------------------------------------------------------
+ */
 void create_user_dir(std::string user_id) {
     fs::path user_dir = server_dir / fs::path(user_id);
     if (!fs::exists(user_dir)) {
         fs::create_directory(user_dir);
     }
 }
-// }}}
 
 
-// run_user_interface {{{
-//
-// Aguarda comandos do usuário
-//
+/*
+ * -----------------------------------------------------------------------------
+ * run_user_interface
+ * -----------------------------------------------------------------------------
+ * Aguarda comandos das threads dos usuários
+ *
+ * Essa função fica aguardando a thread do usuário escrever um comando no
+ * socket.
+ *
+ * Uma vez que essa thread envia um comando, o mutex do cliente é travado, isso
+ * garante que apenas um cliente do mesmo usuário consiga executar um comando
+ * de cada vez.
+ *
+ * É importante fazer isso, porque alguns comandos fazem alterações em
+ * estruturas que podem ser compartilhadas por mais de uma thread.
+ *
+ * Na prática, apenas uma das threads com o mesmo user_id pode entrar dentro do
+ * switch por vez.
+ *
+ * Ao fim da execução do comando, o mutex é destravado, e outra thread (com o
+ * mesmo user_id) pode executar o próximo comando.
+ * -----------------------------------------------------------------------------
+ */
 void run_user_interface(const std::string user_id, int client_socket_fd) {
     Command command = Exit;
 
@@ -252,36 +329,32 @@ void run_user_interface(const std::string user_id, int client_socket_fd) {
 
         switch (command) {
         case Upload:
-            std::cout << "Upload Requested\n";
+            //std::cout << "Upload Requested\n";
             filename = receive_string(client_socket_fd);
 
-            std::cout << "Arquivo a ser rebido: " << filename << "\n";
+            //std::cout << "Arquivo a ser rebido: " << filename << "\n";
             receive_file(user_id, filename, client_socket_fd);
             break;
 
         case Download:
-            std::cout << "Download Requested\n";
+            //std::cout << "Download Requested\n";
             filename = receive_string(client_socket_fd);
             send_file(user_id, filename, client_socket_fd);
             break;
 
         case Delete:
-            std::cout << "Delete Requested\n";
+            //std::cout << "Delete Requested\n";
             filename = receive_string(client_socket_fd);
             delete_file(user_id, filename, client_socket_fd);
             break;
 
         case ListServer:
-            std::cout << "ListServer Requested\n";
+            //std::cout << "ListServer Requested\n";
             send_file_infos(user_id, client_socket_fd);
             break;
 
-        case GetSyncDir:
-            std::cout << "GetSyncDir Requested\n";
-            break;
-
         case Exit:
-            std::cout << "Exit Requested\n";
+            //std::cout << "Exit Requested\n";
             disconnect_client(user_id, client_socket_fd);
             break;
 
@@ -294,18 +367,27 @@ void run_user_interface(const std::string user_id, int client_socket_fd) {
     }
     while (command != Exit);
 }
-// }}}
 
 
-// receive_file {{{
-//
-// Recebe um arquivo do usuário.
-//
+/*
+ * -----------------------------------------------------------------------------
+ * receive_file
+ * -----------------------------------------------------------------------------
+ * Recebe um arquivo do usuário.
+ *
+ * Uma vez que o nome do arquivo foi fornecido, essa função recebe o tamanho do
+ * arquivo em bytes e a data de modificação.  Caso o arquivo não exista no
+ * servidor ou seja mais recente, uma notificação para enviar o arquivo será
+ * enviada ao cliente.  Depois a função tentará abrir o arquivo.  O sucesso ou
+ * não da abertura do arquivo é informado ao cliente.  Em caso de sucesso na
+ * hora de abrir o arquivo ele será recebido do cliente.
+ * -----------------------------------------------------------------------------
+ */
 void receive_file(std::string user_id, std::string filename, int client_socket_fd) {
 
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
 
-    std::cout << "O caminho absoluto até o arquivo no servidor é " << absolute_path.string() << "\n";
+    //std::cout << "O caminho absoluto até o arquivo no servidor é " << absolute_path.string() << "\n";
 
     // Vamos ler o tamanho do arquivo!
     size_t file_size;
@@ -353,20 +435,27 @@ void receive_file(std::string user_id, std::string filename, int client_socket_f
 // }}}
 
 
-// send_file {{{
-// 
-// Envia um arquivo para um usuário
-//
+/*
+ * -----------------------------------------------------------------------------
+ * send_file
+ * -----------------------------------------------------------------------------
+ * Envia um arquivo para um usuário.  Se o arquivo existir e puder ser lido, a
+ * função notifica o cliente.  Então ela envia o tamanho e a data de
+ * modificação.  Ela lê a resposta do cliente indicando se ele conseguiu abrir
+ * o arquivo para escrita localmente.  Em caso afirmativo, o arquivo é enviado
+ * ao cliente.  Por fim, a função envia a data de modificação para o cliente,
+ * a fim de manter o arquivo sincronizado.
+ * -----------------------------------------------------------------------------
+ */
 void send_file(std::string user_id, std::string filename, int client_socket_fd) {
 
+    // Determina o caminho absoluto do arquivo no servidor
     fs::path absolute_path = server_dir / fs::path(user_id) / fs::path(filename);
-    
-    std::cout << "Filename " << filename << "\n";
 
-    std::cout << "Localizando " << absolute_path.string() << " no servidor\n";
-
-    bool file_ok;
     FILE *file;
+    bool file_ok;
+
+    // Se o arquivo existir, tenta abri-lo
     if ((file_ok = fs::exists(absolute_path)) == true) {
         file = fopen(absolute_path.c_str(), "rb");
 
@@ -375,6 +464,7 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
         }
     }
 
+    // Indica ao usuário se o arquivo existe ou se foi possível abri-lo
     send_bool(client_socket_fd, file_ok);
 
     if (file_ok) {
@@ -385,31 +475,41 @@ void send_file(std::string user_id, std::string filename, int client_socket_fd) 
         return;
     }
 
+    // Caso o arquivo esteja ok, envia o tamanho do arquivo
     size_t file_size = fs::file_size(absolute_path);
     write_socket(client_socket_fd, (const void *) &file_size, sizeof(file_size));
 
+    // Recebe a confirmação que o cliente conseguiu criar o arquivo localmente,
+    // e está esperando os bytes.
     bool ok = read_bool(client_socket_fd);
+
     if (ok) {
+        // Envia os bytes do arquivo ao cliente
         send_file(client_socket_fd, file, file_size);
     }
     fclose(file);
-    
-    std::cout << "Absolute Path: " << absolute_path.string() << "\n";
-    
+
+    // Envia ao cliente a data de modificação do arquivo, para que ele possa
+    // modificar sua cópia local com a data correta.
+    //
     time_t timestamp = fs::last_write_time(absolute_path);
     std::cout << "Last write time a ser enviado: " << timestamp << "\n";
     // Envia a data de modificação
     write_socket(client_socket_fd, (const void *) &timestamp, sizeof(timestamp));
     std::cout << "Data de criação enviada\n";
-    
+
 }
-// }}}
 
 
-// delete_file {{{
-//
-// Exclui no servidor o arquivo cujo nome foi passado pelo usuário
-//
+/*
+ * -----------------------------------------------------------------------------
+ * delete_file
+ * -----------------------------------------------------------------------------
+ * Exclui no servidor o arquivo cujo nome foi passado pelo usuário.  Se o
+ * arquivo for excluído, o vetor de FileInfo do usuário é atualizado para
+ * remover o arquivo. Se o arquivo não existir, não faz nada.
+ * -----------------------------------------------------------------------------
+ */
 void delete_file(std::string user_id, std::string filename, int client_socket_fd) {
 
     auto it = clients.find(user_id);
@@ -446,19 +546,33 @@ void delete_file(std::string user_id, std::string filename, int client_socket_fd
     }
 
 }
-// }}}
 
 
-void update_files(std::string user_id, std::string filename, size_t file_size, time_t timestamp) {
+/*
+ * ----------------------------------------------------------------------------
+ * update_files
+ * ----------------------------------------------------------------------------
+ * Atualiza o vetor de FileInfo do client com novas informações, ou insere um
+ * novo FileInfo, caso o registro ainda não exista.
+ * ----------------------------------------------------------------------------
+ */
+void update_files(std::string user_id,
+                  std::string filename,
+                  size_t file_size,
+                  time_t timestamp) {
+
     auto it = clients.find(user_id);
 
+    // Verifica se o cliente existe no dicionário
     if (it == clients.end()) {
-        std::cerr << "Erro ao atualizar os arquivos do cliente, cliente " << user_id << " não encontrado.\n";
+        std::cerr << "Erro ao atualizar os arquivos do cliente, cliente "
+                  << user_id << " não encontrado.\n";
         return;
     }
 
     Client *client = it->second;
 
+    // Procura o FileInfo a ser atualizado
     FileInfo *file = nullptr;
     for (FileInfo &file_info : client->files) {
         if (file_info.filename() == filename) {
@@ -468,11 +582,12 @@ void update_files(std::string user_id, std::string filename, size_t file_size, t
     }
 
     if (file != nullptr) {
+        // Se encontrar um registro, ele será atualizado
         file->set_bytes(file_size);
         file->set_last_modified(timestamp);
     }
     else {
-        // Arquivo não existe;
+        // Se não encontrar, cria um novo FileInfo e insere no vetor
         FileInfo new_file{};
         new_file.set_filename(filename);
         new_file.set_extension(fs::path(filename).extension().string());
@@ -483,18 +598,23 @@ void update_files(std::string user_id, std::string filename, size_t file_size, t
 }
 
 
-// send_file_infos {{{
-//
-// Envia um vetor de FileInfo para o usuário. Esse vetor contém todas as
-// informações sobre os arquivos presentes do diretório do usuário.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * send_file_infos
+ * ----------------------------------------------------------------------------
+ * Envia todos os registros de FileInfo do usuário para o cliente.
+ *
+ * Primeiramente é enviado o tamanho do vetor, e depois cada um dos structs
+ * é enviado.
+ * ----------------------------------------------------------------------------
+ */
 void send_file_infos(std::string user_id, int client_socket_fd) {
     auto it = clients.find(user_id);
 
-    // Testar se o cliente foi encontrado
+    // Testa se o cliente foi encontrado
     if (it == clients.end()) {
         std::cerr << "Erro ao enviar a lista de file_infos, client " << user_id
-            << " não encontrado\n";
+                  << " não encontrado\n";
         return;
     }
 
@@ -503,41 +623,47 @@ void send_file_infos(std::string user_id, int client_socket_fd) {
 
     // Envia o tamanho da lista
     write_socket(client_socket_fd, (const void *) &n, sizeof(n));
-    
+
     for (int i = 0; i < n; ++i) {
         write_socket(client_socket_fd, (const void *) &client->files[i], sizeof(client->files[i]));
     }
 }
-// }}}
 
 
-// lock_user {{{
-//
-// Trava todas as outras threads de um mesmo usuário.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * lock_user
+ * ----------------------------------------------------------------------------
+ * Trava todas as outras threads de um mesmo usuário.
+ *
+ * Como essa função altera uma variável local, ela também faz uso de um mutex,
+ * para permitir apenas uma thread por vez de entrar na seção crítica.
+ * ----------------------------------------------------------------------------
+ */
 void lock_user(std::string user_id) {
     std::lock_guard<std::mutex> lock(user_lock_mutex);
 
     auto it = clients.find(user_id);
     if (it != clients.end()) {
         it->second->user_mutex.lock();
-        //it->second->sem.wait();
     }
 }
-// }}}
 
 
-// unlock_user {{{
-//
-// Destrava as threads do usuário.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * lock_user
+ * ----------------------------------------------------------------------------
+ * Destrava as threads do usuário.
+ *
+ * Também usa mutex para fazer exclusão mútua de todas as threads.
+ * ----------------------------------------------------------------------------
+ */
 void unlock_user(std::string user_id) {
     std::lock_guard<std::mutex> lock(user_lock_mutex);
 
     auto it = clients.find(user_id);
     if (it != clients.end()) {
         it->second->user_mutex.unlock();
-        //it->second->sem.notify();
     }
 }
-// }}}
