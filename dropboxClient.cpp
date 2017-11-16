@@ -17,28 +17,109 @@
 
 namespace fs = boost::filesystem;
 
-// O mutex de envio de comandos ao servidor.
-// Apenas uma thread de cada vez poderá enviar comandos.
+//=============================================================================
+// Globais
+//=============================================================================
+
+
+/*
+ * ----------------------------------------------------------------------------
+ * command_mutex
+ * ----------------------------------------------------------------------------
+ * O mutex de envio de comandos ao servidor.  Apenas uma das threads do
+ * cliente poderá enviar comandos de cada vez.  Uma vez que um comando inicie,
+ * ele terá que ser concluído até que a outra thread possa mandar comandos.
+ *
+ * Isso é necessário porque todas as threads usam o mesmo socket com o servidor
+ * para enviar comandos. Como é necessário que haja sincronização entre os
+ * comandos enviados pelo cliente, com o servidor esperando pelos comandos,
+ * temos que garantir que um comando do cliente não pode ser interrompido
+ * no meio.
+ * ----------------------------------------------------------------------------
+ */
 std::mutex command_mutex;
 
-// O id do usuário
+
+/*
+ * ----------------------------------------------------------------------------
+ * user_id
+ * ----------------------------------------------------------------------------
+ * A string que representa o usuário.  Ela é definida por argumento no início
+ * do programa.  Ela é usada para criar o diretório local e remoto, e
+ * identifica o cliente para fins de exclusão mútua no servidor.
+ * ----------------------------------------------------------------------------
+ */
 std::string user_id;
 
-// O diretório local do usuário
+
+/*
+ * ----------------------------------------------------------------------------
+ * user_id
+ * ----------------------------------------------------------------------------
+ * O diretório local do usuário.
+ * ----------------------------------------------------------------------------
+ */
 fs::path user_dir;
 
-// O número da porta do servidor
+
+/*
+ * ----------------------------------------------------------------------------
+ * port_number
+ * ----------------------------------------------------------------------------
+ * O número da porta do servidor.
+ * ----------------------------------------------------------------------------
+ */
 uint16_t port_number;
 
-// O endereço do servidor
+
+/*
+ * ----------------------------------------------------------------------------
+ * server_address
+ * ----------------------------------------------------------------------------
+ * O struct com as informações do endereço do servidor.
+ * ----------------------------------------------------------------------------
+ */
 sockaddr_in server_address{};
 
-// Socket para se comunicar com o servidor.
+
+/*
+ * ----------------------------------------------------------------------------
+ * socket_fd
+ * ----------------------------------------------------------------------------
+ * O socket com o qual o cliente se comunica e envia comandos ao servidor.
+ * ----------------------------------------------------------------------------
+ */
 int socket_fd;
 
-// Objeto que vai ficar escutando mudancas no diretorio do cliente.
-Inotify inotify(IN_CREATE | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE | IN_CLOSE_WRITE);
 
+/*
+ * ----------------------------------------------------------------------------
+ * inotify
+ * ----------------------------------------------------------------------------
+ * Objeto que vai ficar escutando mudanças no diretório do cliente.
+ * ----------------------------------------------------------------------------
+ */
+Inotify inotify(IN_CREATE | IN_MOVED_FROM | IN_MOVED_TO |
+                IN_DELETE | IN_CLOSE_WRITE);
+
+
+//=============================================================================
+// Funções
+//=============================================================================
+
+/*
+ * ----------------------------------------------------------------------------
+ * main
+ * ----------------------------------------------------------------------------
+ * A função mais espera pelo:
+ *  - user_id
+ *  - hostname
+ *  - porta
+ *
+ * A função manda criar o diretório de sincronização, bem como cria as
+ * threads para enviar comandos e observar o diretório de sincronização.
+ * ----------------------------------------------------------------------------
+ */
 int main(int argc, char **argv) {
     if (argc < 4) {
         std::cerr << "Argumentos insuficientes\n";
@@ -47,18 +128,24 @@ int main(int argc, char **argv) {
     }
 
     user_id = std::string(argv[1]);
+
     std::string hostname = std::string(argv[2]);
+
     char *end;
     port_number = static_cast<uint16_t>(std::strtol(argv[3], &end, 10));
 
+    // Tenta se conectar ao servidor.
     if (connect_server(hostname, port_number) == ConnectionResult::Error) {
         std::cerr << "Erro ao se conectar com o servidor\n";
         std::exit(1);
     }
 
+    // Cria o diretório de sincronização
     create_sync_dir();
+
+    // Sincroniza arquivos com o servidor
     sync_client();
-    
+
     // Manda a global inotify cuidar do diretório de sincronização
     inotify.watchDirectoryRecursively(user_dir);
 
@@ -73,7 +160,7 @@ int main(int argc, char **argv) {
     // get_dir_sync_thread.detach();
 
 
-    // Criação de thread de sincronização
+    // Cria a thread de sincronização, para o inotify
     std::thread sync_thread;
     sync_thread = std::thread(run_sync_thread);
     if (!sync_thread.joinable()) {
@@ -84,31 +171,47 @@ int main(int argc, char **argv) {
     sync_thread.detach();
 
 
-    // Exibe a interface
+    // Exibe a interface de comandos ao usuário
     run_interface();
 }
 
 
+/*
+ * ----------------------------------------------------------------------------
+ * run_sync_thread
+ * ----------------------------------------------------------------------------
+ * Escuta por eventos no diretório do usuário. Caso um deles ocorra, envia
+ * o comando de associado ao servidor.
+ *
+ * Antes de cada comando ser enviado, temos que travar o mutex de comandos.
+ *
+ * O mutex é destravado quando o objeto "lock" sai de escopo e seu destrutor
+ * é invocado.
+ * ----------------------------------------------------------------------------
+ */
 void run_sync_thread() {
     while (true) {
         FileSystemEvent event = inotify.getNextEvent();
 
-        // Testa quais dos dois deve ser o evento certo
         if (event.mask & IN_MOVED_FROM || event.mask & IN_DELETE) {
-            // trava os comandos
             std::lock_guard<std::mutex> lock(command_mutex);
             send_delete_command(event.path.filename().string());
-            // destrava os comandos
         }
         else if (event.mask & IN_MOVED_TO || event.mask & IN_CREATE || event.mask & IN_CLOSE_WRITE) {
-            // trava os comandos
             std::lock_guard<std::mutex> lock(command_mutex);
             send_file(event.path.string());
-            // destrava os comandos
         }
     }
 }
 
+
+/*
+ * ----------------------------------------------------------------------------
+ * run_get_sync_dir_thread
+ * ----------------------------------------------------------------------------
+ * Roda a função "sync_client()" a cada 5 segundos.
+ * ----------------------------------------------------------------------------
+ */
 void run_get_sync_dir_thread() {
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
@@ -118,6 +221,20 @@ void run_get_sync_dir_thread() {
 }
 
 
+/*
+ * ----------------------------------------------------------------------------
+ * connect_server
+ * ----------------------------------------------------------------------------
+ * Tenta conectar o cliente ao servidor.
+ *
+ * Envia o user_id e espera a resposta.
+ *
+ * Se não houver 2 outros dispositivos do mesmo user_id conectados, a conexão
+ * provavelmente será bem sucedida.
+ *
+ * Retorna um enum ConnectionResult com o resultado.
+ * ----------------------------------------------------------------------------
+ */
 ConnectionResult connect_server(std::string hostname, uint16_t port) {
     hostent *server = gethostbyname(hostname.c_str());
 
@@ -165,9 +282,13 @@ ConnectionResult connect_server(std::string hostname, uint16_t port) {
 }
 
 
-// print_interface {{{
-//
-//
+/*
+ * ----------------------------------------------------------------------------
+ * print_interface
+ * ----------------------------------------------------------------------------
+ * Imprime os comandos possíveis ao usuário.
+ * ----------------------------------------------------------------------------
+ */
 void print_interface() {
     std::cout << "Digite o comando:\n";
     std::cout << "\tupload <path/filename.ext>\n";
@@ -178,12 +299,23 @@ void print_interface() {
     std::cout << "\tget_sync_dir\n";
     std::cout << "\texit\n";
 }
-// }}}
 
 
-// run_interface {{{
-//
-//
+/*
+ * ----------------------------------------------------------------------------
+ * run_interface
+ * ----------------------------------------------------------------------------
+ * Fica esperando os comandos do usuário e envia esses comandos ao servidor.
+ *
+ * Se o comando precisar de um argumento e ele não for fornecido, não haverá
+ * tratamento de exceções e o programa irá falhar.
+ *
+ * A cada iteração a interface será imprimida na tela.
+ *
+ * Uma vez que um comando for digitado, o mutex de comandos será travado até
+ * que o comando seja concluído.
+ * ----------------------------------------------------------------------------
+ */
 void run_interface() {
     std::string delim(" ");
     std::string input;
@@ -237,12 +369,21 @@ void run_interface() {
     }
     while (command != "exit");
 }
-// }}}
 
 
-// send_file {{{
-//
-//
+/*
+ * ----------------------------------------------------------------------------
+ * send_file
+ * ----------------------------------------------------------------------------
+ * Envia o arquivo ao servidor.
+ *
+ * O caminho absoluto do arquivo deverá ser fornecido.
+ *
+ * São enviados o tamanho do arquivo, bem como sua data de modificação.  O
+ * servidor responde se precisa do arquivo.  Em caso positivo, seus bytes são
+ * enviados.
+ * ----------------------------------------------------------------------------
+ */
 void send_file(std::string absolute_filename) {
     ssize_t bytes;
     FILE *file;
@@ -257,10 +398,8 @@ void send_file(std::string absolute_filename) {
             write_socket(socket_fd, (const void *) &command, sizeof(command));
 
             // Envia o nome do arquivo
-            std::cout << "Enviando o nome do arquivo\n";
             std::string filename = absolute_path.filename().string();
             send_string(socket_fd, filename);
-            std::cout << "Nome do arquivo enviado\n";
 
             // Envia o tanho do arquivo
             size_t file_size = fs::file_size(absolute_path);
@@ -283,12 +422,11 @@ void send_file(std::string absolute_filename) {
                 fclose(file);
                 return;
             }
+            //std::cout << "Preparando para enviar os bytes do arquivo\n";
 
-            std::cout << "Preparando para enviar os bytes do arquivo\n";
             // Se o servidor quiser o arquivo, envia os bytes
-
-            // Envia o arquivo
             send_file(socket_fd, file, file_size);
+
             fclose(file);
         }
         std::cout << "Arquivo " << absolute_path.string() << " enviado\n";
@@ -297,15 +435,34 @@ void send_file(std::string absolute_filename) {
         std::cerr << "Arquivo " << absolute_filename << " não existe\n";
     }
 }
-// }}}
 
 
-// get_file {{{
+/*
+ * ----------------------------------------------------------------------------
+ * get_file
+ * ----------------------------------------------------------------------------
+ * Função auxiliar para baixar o arquivo para o diretório de execução do
+ * cliente.
+ * ----------------------------------------------------------------------------
+ */
 void get_file(std::string filename) {
     get_file(filename, true);
 }
 
 
+/*
+ * ----------------------------------------------------------------------------
+ * get_file
+ * ----------------------------------------------------------------------------
+ * Obtém o arquivo do servidor.
+ *
+ * Caso "current_path" seja verdadeior, o arquivo será baixado no diretório
+ * onde o cliente está sendo executado.
+ *
+ * Caso "current_path" seja falso, esse arquivo será baixado no diretório de
+ * sincronização do cliente.
+ * ----------------------------------------------------------------------------
+ */
 void get_file(std::string filename, bool current_path) {
 
     Command command = Download;
@@ -322,15 +479,14 @@ void get_file(std::string filename, bool current_path) {
     size_t file_size;
     read_socket(socket_fd, (void *) &file_size, sizeof(file_size));
 
-    std::cout << "Tamanho do arquivo a receber: " << file_size << " bytes\n";
-
     fs::path absolute_path;
     if (current_path) {
         absolute_path = fs::current_path() / fs::path(filename);
-    } else {
+    }
+    else {
         absolute_path = user_dir / fs::path(filename);
     }
-    
+
     FILE *file = fopen(absolute_path.c_str(), "wb");
     if (file == nullptr) {
         std::cout << "Erro ao abrir o arquivo para escrita\n";
@@ -341,37 +497,42 @@ void get_file(std::string filename, bool current_path) {
 
     read_file(socket_fd, file, file_size);
     fclose(file);
-    
-    std::cout << "Preparando-se para mudar a data do arquivo " << absolute_path.string() << "\n";
-    
+
+
     time_t time;
     read_socket(socket_fd, (void *) &time, sizeof(time));
 
-    std::cout << "Data recebida\n";
     fs::last_write_time(absolute_path, time);
-   
+
+    std::cout << "Arquivo " << filename << " recebido com sucesso\n";
 }
-// }}}
 
 
-// close_connection {{{
-//
-// Desconecta o usuário do servidor e fecha o socket.  Encerra o programa.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * close_connection
+ * ----------------------------------------------------------------------------
+ * Desconecta o usuário do servidor e fecha o socket.  Encerra o programa.
+ * ----------------------------------------------------------------------------
+ */
 void close_connection() {
     Command command = Exit;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
     close(socket_fd);
 }
-// }}}
 
 
-// list_server_files {{{
-//
-// Imprime informações dos arquivos presentes no diretório do usuário no
-// servidor.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * list_server_files
+ * ----------------------------------------------------------------------------
+ * Imprime informações dos arquivos presentes no diretório do usuário no
+ * servidor.
+ * ----------------------------------------------------------------------------
+ */
 void list_server_files() {
+
+    // Obtém o vetor com os FileInfo
     std::vector<FileInfo> server_files = get_server_files();
 
     std::cout << "=====================\n";
@@ -381,97 +542,115 @@ void list_server_files() {
         std::cout << file.string() << "\n";
     }
 }
-// }}}
 
 
-// list_local_files {{{
-//
-// Imprime informações dos arquivos locais
-//
+/*
+ * ----------------------------------------------------------------------------
+ * list_local_files
+ * ----------------------------------------------------------------------------
+ * Imprime informações dos arquivos locais
+ *
+ * Essas informações são obtidas a partir do sistema de arquivos.
+ * ----------------------------------------------------------------------------
+ */
 void list_local_files() {
     fs::directory_iterator end_iter;
     fs::directory_iterator dir_iter(user_dir);
-    
+
     char date_buffer[20];
-    
+
     std::cout << "====================\n";
     std::cout << "Arquivos no cliente:\n";
     std::cout << "====================\n\n";
     while (dir_iter != end_iter) {
         if (fs::is_regular_file(dir_iter->path())) {
-            
+
             std::cout << "Nome: " << dir_iter->path().filename() << "\n";
             std::cout << "Tamanho: " << fs::file_size(dir_iter->path()) << " bytes\n";
-            
+
             time_t date = fs::last_write_time(dir_iter->path());
             strftime(date_buffer, 20, "%Y-%m-%d %H:%M:%S", localtime(&date));
-            
+
             std::cout << "Modificado: " << date_buffer << "\n\n";
         }
         ++dir_iter;
     }
 }
-// }}}
 
 
-// create_sync_dir {{{
-//
-// Cria o diretório de sincronização no diretório do usuário.  Também define a
-// global "user_dir" que referencia esse diretório.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * create_sync_dir
+ * ----------------------------------------------------------------------------
+ * Cria o diretório de sincronização no diretório do usuário.  Também define a
+ * global "user_dir" que referencia esse diretório.
+ * ----------------------------------------------------------------------------
+ */
 void create_sync_dir() {
     fs::path home_dir(getenv("HOME"));
     fs::path sync_dir("sync_dir_" + user_id);
     fs::path fullpath = home_dir / sync_dir;
-    
-    // Global boost::filesystem::path
+
+    // Define a global "user_dir"
     user_dir = fullpath;
-    
+
     if (!fs::exists(fullpath)) {
         fs::create_directory(fullpath);
     }
 }
-// }}}
 
 
-//  get_server_files {{{
-//
-//  Retorna um vetor contendo as informações dos arquivos existentes no
-//  servidor.  Os dados podem ser usados para imprimir os arquivos existentes
-//  no servidor ou para fazer a sincronização.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * get_server_files
+ * ----------------------------------------------------------------------------
+ * Envia o comando de ListServer ao servidor e lê todos os FileInfo do usuário
+ * presentes no servidor.
+ *
+ * Primeiramente lê o tamanho do vetor, depois lê cada um dos structs FileInfo
+ * presentes nesse vetor.
+ *
+ * Esse vetor pode ser usado para o cliente fazer a sincronização ou
+ * simplesmente imprimir os arquivos do servidor.
+ *
+ * Retorna o vetor de FileInfo
+ * ----------------------------------------------------------------------------
+ */
 std::vector<FileInfo> get_server_files() {
 
     // Envia o comando para listar os arquivos.
     Command command = ListServer;
     write_socket(socket_fd, (const void *) &command, sizeof(command));
 
-    // Lê o tamamnho da lista
+    // Lê o tamanho do vetor
     size_t n;
     read_socket(socket_fd, (void *) &n, sizeof(n));
 
     std::vector<FileInfo> files;
     files.reserve(n);
 
-    // Se prepara para receber a lista dos arquivos.
+    // Recebe os membros do vetor e o recria localmente.
     for (int i = 0; i < n; ++i) {
         FileInfo file_info;
         read_socket(socket_fd, (void *) &file_info, sizeof(file_info));
         files.push_back(file_info);
     }
 
+    // Retorna o vetor.
     return std::move(files);
 }
-// }}}
 
 
-// delete_file {{{
-//
-// Apaga um arquivo localmente.
-//
-// A thread do INotify se encarregará de enviar o comando de "delete" para o
-// servidor quando o arquivo for movido localmente.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * delete_file
+ * ----------------------------------------------------------------------------
+ * Apaga um arquivo localmente.
+ *
+ * A thread do inotify se encarregará de enviar o comando de "delete" para o
+ * servidor quando o arquivo for movido localmente.
+ * ----------------------------------------------------------------------------
+ */
 void delete_file(std::string filename) {
     fs::path filepath = user_dir / fs::path(filename);
 
@@ -485,15 +664,17 @@ void delete_file(std::string filename) {
         std::cout << "Arquivo " << filename << " não existe no diretório de sincronização\n";
     }
 }
-// }}}
 
 
-// send_delete_command {{{
-//
-// Envia o comando Delete ao servidor.
-//
-// Esta função deve ser chamada pela thread do INotify
-//
+/*
+ * ----------------------------------------------------------------------------
+ * send_delete_command
+ * ----------------------------------------------------------------------------
+ * Envia o comando Delete ao servidor.
+ *
+ * Esta função deve ser chamada pela thread do inotify.
+ * ----------------------------------------------------------------------------
+ */
 void send_delete_command(std::string filename) {
     Command command = Delete;
 
@@ -502,33 +683,41 @@ void send_delete_command(std::string filename) {
         send_string(socket_fd, filename);
     }
 }
-// }}}
 
 
-// sync_client {{{
-//
-// Sincroniza os arquivos do cliente com os do servidor, e vice-versa
-//
-// A função é implementada enviando diversos comandos ao servidor.
-//
+/*
+ * ----------------------------------------------------------------------------
+ * sync_client
+ * ----------------------------------------------------------------------------
+ * Sincroniza os arquivos do cliente com os do servidor, e vice-versa.
+ *
+ * Essa função é implementada enviando diversos comandos ao servidor.
+ * ----------------------------------------------------------------------------
+ */
 void sync_client() {
+
+    // Obtém a lista de arquivos do servidor.
     std::vector<FileInfo> server_files = get_server_files();
-    
-    // Arquivos no servidor
+
+    // Conjunto dos nomes dos arquivos do presentes no servidor.
+    //
+    // É mais conveniente localizar nomes num "set" do que num vetor de
+    // FileInfo
     std::set<std::string> files_on_server;
-    
-    // Arquivos para enviar para o servidor
+
+    // Conjunto dos nomes dos arquivos para enviar ao servidor.
     std::set<std::string> files_to_send_to_server;
-    
+
     for (FileInfo &file_info : server_files) {
         fs::path absolute_path = user_dir / fs::path(file_info.filename());
-        
+
+        // Acrescenta ao conjuto dos arquivos do servidor.
         files_on_server.insert(file_info.filename());
-               
+
         bool exists = fs::exists(absolute_path);
         if ((exists && (fs::last_write_time(absolute_path) < file_info.last_modified())) || !exists) {
             get_file(file_info.filename(), false);
-            
+
         }
         else if (fs::last_write_time(absolute_path) > file_info.last_modified()) {
             // Se o arquivo local é mais novo do que o do servidor, ele
@@ -538,16 +727,16 @@ void sync_client() {
             files_to_send_to_server.insert(filename.string());
         }
     }
-    
-    // Determina quais arquivos enviar para o servidor.   
+
+    // Determina quais arquivos enviar para o servidor.
     fs::directory_iterator end_iter;
     fs::directory_iterator dir_iter(user_dir);
     while (dir_iter != end_iter) {
         if (fs::is_regular_file(dir_iter->path())) {
             std::string filename = dir_iter->path().filename().string();
-               
+
             // Se o arquivo no diretório do cliente não existe nos arquivos
-            // enviados pelo servidor, devemos inserir seu nome para enviar. 
+            // enviados pelo servidor, devemos inserir seu nome para enviar.
             auto it = files_on_server.find(filename);
             if (it == files_on_server.end()) {
                 files_to_send_to_server.insert(dir_iter->path().string());
@@ -555,11 +744,10 @@ void sync_client() {
         }
         ++dir_iter;
     }
-    
+
     //std::cout << "\n\nArquivo para enviar para o servidor\n";
     for (auto &filename : files_to_send_to_server) {
         //std::cout << "Enviando " << filename << " para o servidor\n";
         send_file(filename);
     }
 }
-// }}}
