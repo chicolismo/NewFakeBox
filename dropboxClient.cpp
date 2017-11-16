@@ -57,20 +57,20 @@ int main(int argc, char **argv) {
     }
 
     create_sync_dir();
-    //sync_client();
+    sync_client();
     
     // Manda a global inotify cuidar do diretório de sincronização
     inotify.watchDirectoryRecursively(user_dir);
 
     // Cria thread para mater o cliente sincronizado com o servidor.
-    std::thread get_dir_sync_thread;
-    get_dir_sync_thread = std::thread(run_get_sync_dir_thread);
-    if (!get_dir_sync_thread.joinable()) {
-        std::cerr << "Erro ao criar thread de get_dir_sync\n";
-        close_connection();
-        return 1;
-    };
-    get_dir_sync_thread.detach();
+    //std::thread get_dir_sync_thread;
+    //get_dir_sync_thread = std::thread(run_get_sync_dir_thread);
+    //if (!get_dir_sync_thread.joinable()) {
+        //std::cerr << "Erro ao criar thread de get_dir_sync\n";
+        //close_connection();
+        //return 1;
+    //};
+    //get_dir_sync_thread.detach();
 
 
     // Criação de thread de sincronização
@@ -111,9 +111,9 @@ void run_sync_thread() {
 
 void run_get_sync_dir_thread() {
     while (true) {
+        std::this_thread::sleep_for(std::chrono::seconds(5));
         std::lock_guard<std::mutex> lock(command_mutex);
         sync_client();
-        std::this_thread::sleep_for(std::chrono::seconds(5));
     }
 }
 
