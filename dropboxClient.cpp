@@ -7,6 +7,7 @@
 #include <strings.h>
 #include "dropboxServer.h"
 #include <boost/filesystem.hpp>
+#include <boost/regex.hpp>
 #include "Inotify-master/FileSystemEvent.h"
 #include "Inotify-master/Inotify.h"
 #include <sstream>
@@ -176,6 +177,8 @@ int main(int argc, char **argv) {
 }
 
 
+#pragma clang diagnostic push // Não precisamos de warnings para loops infinitos
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
 /*
  * ----------------------------------------------------------------------------
  * run_sync_thread
@@ -190,21 +193,61 @@ int main(int argc, char **argv) {
  * ----------------------------------------------------------------------------
  */
 void run_sync_thread() {
+
+    // Padrão regex de arquivos que não queremos enviar ao servidor, pois são
+    // usados pelos programas para armazenar mudanças temporárias nos arquivos
+    // que estão sendo manipulados.
+    //
+    // Não queremos enviar qualquer arquivo do tipo .goutputstream-*,
+    // nem arquivos que comecem com "~"
+    boost::regex invalid_files_pattern{"^(\\.goutputstream|~)"};
+
     while (true) {
         FileSystemEvent event = inotify.getNextEvent();
+        auto mask = event.mask;
 
-        if (event.mask & IN_MOVED_FROM || event.mask & IN_DELETE) {
-            std::lock_guard<std::mutex> lock(command_mutex);
-            send_delete_command(event.path.filename().string());
+        // O nome do arquivo que causou o evento, sem o caminho absoluto
+        std::string filename = event.path.filename().string();
+
+        std::cout << filename << " causou o evento\n";
+
+        if (mask & IN_MOVED_FROM ||
+            mask & IN_DELETE ||
+            mask & IN_MOVED_TO ||
+            mask & IN_CREATE ||
+            mask & IN_MODIFY) {
+
+            if (boost::regex_search(filename, invalid_files_pattern)) {
+                // Se o arquivo que causou o evento for temporário, pular o evento.
+                //std::cout << "Arquivo " << event.path.string() << " não será enviado ao servidor\n";
+                continue;
+            }
         }
-        else if (event.mask & IN_MOVED_TO || event.mask & IN_CREATE || event.mask & IN_CLOSE_WRITE) {
+
+        if (mask & IN_MOVED_FROM || mask & IN_DELETE) {
             std::lock_guard<std::mutex> lock(command_mutex);
-            send_file(event.path.string());
+            send_delete_command(filename);
         }
+        else if (mask & IN_MOVED_TO || mask & IN_CREATE || mask & IN_MODIFY) {
+            // O evento deve ser causado por um arquivo comum, e não um link simbólico ou diretório.
+            if (fs::is_regular_file(event.path)) {
+                std::lock_guard<std::mutex> lock(command_mutex);
+                // O caminho absoluto é necessário na hora de enviar arquivos.
+                send_file(event.path.string());
+            }
+        }
+
+        // IN_ACCESS <- Quando um arquivo existente for acessado para escrita,
+        // teremos que obter o lock.  O lock só poderá ser destravado quando
+        // esse arquivo específico for fechado, ou seja quando houver
+        // IN_CLOSE_WRITE.
     }
 }
+#pragma clang diagnostic pop
 
 
+#pragma clang diagnostic push // Desbilita warnings sobre loop infinito
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
 /*
  * ----------------------------------------------------------------------------
  * run_get_sync_dir_thread
@@ -219,6 +262,7 @@ void run_get_sync_dir_thread() {
         sync_client();
     }
 }
+#pragma clang diagnostic pop
 
 
 /*
